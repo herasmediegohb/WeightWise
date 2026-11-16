@@ -5,7 +5,20 @@ import { useRouter } from "next/navigation";
 import { DownloadSimple, SignOut } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { deleteAllData, logout, saveProfile, setPhase, type ProfileInput } from "@/app/actions";
-import { ACTIVITY } from "@/lib/calc";
+import { ACTIVITY, MAINTAIN_BAND_LB } from "@/lib/calc";
+import {
+  KG_PER_LB,
+  formatWeight,
+  fromCm,
+  fromWater,
+  fromWeight,
+  toCm,
+  toWater,
+  waterUnit,
+  weightInputValue,
+  weightUnit,
+  type Units,
+} from "@/lib/units";
 import { int } from "@/lib/utils";
 import { ImportButton } from "./import-button";
 import { Button, Card, Field, Segmented, Sheet } from "./ui";
@@ -33,18 +46,36 @@ export function SettingsForm({
   backups?: React.ReactNode;
 }) {
   const router = useRouter();
-  const [f, setF] = useState({
+  const initialUnits: Units = initial.units ?? "imperial";
+  /**
+   * Exact stored values. A field still showing its stored value (in whatever
+   * unit) maps back to that exact value, so switching units back and forth,
+   * or saving in kg, never introduces rounding drift.
+   */
+  const exact = {
+    startWeight: (u: Units) => weightInputValue(initial.startWeightLb, u),
+    goalWeight: (u: Units) => weightInputValue(initial.goalWeightLb, u),
+    water: (u: Units) => String(toWater(initial.waterTargetOz, u)),
+  };
+  const exactHeight = (u: Units) => heightFields(initial.heightIn, u);
+  const isExactHeight = (cur: { feet: string; inches: string; cm: string }, u: Units) => {
+    const h = exactHeight(u);
+    return u === "metric" ? cur.cm === h.cm : cur.feet === h.feet && cur.inches === h.inches;
+  };
+  const [units, setUnits] = useState<Units>(initialUnits);
+  // Weight, water and height fields hold display units; they're converted
+  // back to pounds, ounces and inches on save.
+  const [f, setF] = useState(() => ({
     name: initial.name,
     birthdate: initial.birthdate,
-    feet: String(Math.floor(initial.heightIn / 12)),
-    inches: String(Math.round((initial.heightIn % 12) * 10) / 10),
-    startWeightLb: String(initial.startWeightLb),
+    ...heightFields(initial.heightIn, initialUnits),
+    startWeight: weightInputValue(initial.startWeightLb, initialUnits),
     startDate: initial.startDate,
-    goalWeightLb: String(initial.goalWeightLb),
+    goalWeight: weightInputValue(initial.goalWeightLb, initialUnits),
     calorieTarget: String(initial.calorieTarget),
     proteinTargetG: String(initial.proteinTargetG),
-    waterTargetOz: String(initial.waterTargetOz),
-  });
+    water: String(toWater(initial.waterTargetOz, initialUnits)),
+  }));
   const [sex, setSex] = useState(initial.sex);
   const [activity, setActivity] = useState<Activity>(initial.activityLevel);
   const [pace, setPace] = useState(String(initial.paceLbPerWeek));
@@ -70,15 +101,19 @@ export function SettingsForm({
       name: f.name,
       birthdate: f.birthdate,
       sex,
-      heightIn: Number(f.feet) * 12 + Number(f.inches || 0),
-      startWeightLb: Number(f.startWeightLb),
+      heightIn: isExactHeight(f, units) ? initial.heightIn : heightInches(f, units),
+      startWeightLb:
+        f.startWeight === exact.startWeight(units) ? initial.startWeightLb : f.startWeight === "" ? NaN : fromWeight(Number(f.startWeight), units),
       startDate: f.startDate,
-      goalWeightLb: Number(f.goalWeightLb),
+      goalWeightLb:
+        f.goalWeight === exact.goalWeight(units) ? initial.goalWeightLb : f.goalWeight === "" ? NaN : fromWeight(Number(f.goalWeight), units),
       paceLbPerWeek: Number(pace),
       activityLevel: activity,
       calorieTarget: Number(f.calorieTarget),
       proteinTargetG: Number(f.proteinTargetG),
-      waterTargetOz: Number(f.waterTargetOz),
+      waterTargetOz:
+        f.water === exact.water(units) ? initial.waterTargetOz : f.water === "" ? NaN : Math.round(fromWater(Number(f.water), units)),
+      units,
     });
     setSaving(false);
     if (!res.ok) return toast.error(res.error);
@@ -87,6 +122,28 @@ export function SettingsForm({
   }
 
   const paceOptions = ["0.5", "1", "1.5", "2"].includes(pace) ? ["0.5", "1", "1.5", "2"] : [pace, "0.5", "1", "1.5", "2"];
+  const paceLabel = (lb: string) => (units === "metric" ? `${(Number(lb) * KG_PER_LB).toFixed(1)} kg` : `${lb} lb`);
+
+  /** Converts what's typed so far when switching units, so nothing is lost. */
+  function switchUnits(next: Units) {
+    if (next === units) return;
+    const conv = (v: string, fn: (x: number) => string) => (v.trim() === "" || !Number.isFinite(Number(v)) ? v : fn(Number(v)));
+    setF((cur) => ({
+      ...cur,
+      ...(isExactHeight(cur, units) ? exactHeight(next) : heightFields(heightInches(cur, units), next)),
+      startWeight:
+        cur.startWeight === exact.startWeight(units)
+          ? exact.startWeight(next)
+          : conv(cur.startWeight, (x) => weightInputValue(fromWeight(x, units), next)),
+      goalWeight:
+        cur.goalWeight === exact.goalWeight(units)
+          ? exact.goalWeight(next)
+          : conv(cur.goalWeight, (x) => weightInputValue(fromWeight(x, units), next)),
+      water: cur.water === exact.water(units) ? exact.water(next) : conv(cur.water, (x) => String(toWater(fromWater(x, units), next))),
+    }));
+    setUnits(next);
+    setDirty(true);
+  }
 
   return (
     <>
@@ -98,7 +155,7 @@ export function SettingsForm({
             <div className="mt-2 flex items-center justify-between gap-3 rounded-2xl bg-surface-2 px-3.5 py-2.5 text-sm">
               <p className="text-muted tnum">
                 You burn about {int(expenditure)} kcal a day.{" "}
-                {phase === "maintain" ? "For maintenance, the next step is" : `For ${pace} lb a week, that suggests`}{" "}
+                {phase === "maintain" ? "For maintenance, the next step is" : `For ${paceLabel(pace)} a week, that suggests`}{" "}
                 <span className="font-semibold text-fg">{int(suggestedCalories)} kcal</span>.
               </p>
               {Number(f.calorieTarget) !== suggestedCalories && (
@@ -119,7 +176,7 @@ export function SettingsForm({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Protein" type="number" inputMode="numeric" suffix="g" value={f.proteinTargetG} onChange={set("proteinTargetG")} />
-            <Field label="Water" type="number" inputMode="numeric" suffix="oz" value={f.waterTargetOz} onChange={set("waterTargetOz")} />
+            <Field label="Water" type="number" inputMode="numeric" suffix={waterUnit(units)} value={f.water} onChange={set("water")} />
           </div>
         </Card>
 
@@ -148,18 +205,18 @@ export function SettingsForm({
             />
             <p className="mt-1.5 text-sm text-muted">
               {phase === "maintain"
-                ? "Holding your goal weight, give or take 1.5 lb. The weekly check-in keeps calories on track."
+                ? `Holding your goal weight, give or take ${formatWeight(MAINTAIN_BAND_LB, units)}. The weekly check-in keeps calories on track.`
                 : "Each weekly check-in suggests calories for your chosen pace."}
             </p>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Starting weight" type="number" inputMode="decimal" step="0.1" suffix="lb" value={f.startWeightLb} onChange={set("startWeightLb")} />
+            <Field label="Starting weight" type="number" inputMode="decimal" step="0.1" suffix={weightUnit(units)} value={f.startWeight} onChange={set("startWeight")} />
             <Field label="Start date" type="date" max={today} value={f.startDate} onChange={set("startDate")} />
           </div>
-          <Field label="Goal weight" type="number" inputMode="decimal" step="0.1" suffix="lb" value={f.goalWeightLb} onChange={set("goalWeightLb")} />
+          <Field label="Goal weight" type="number" inputMode="decimal" step="0.1" suffix={weightUnit(units)} value={f.goalWeight} onChange={set("goalWeight")} />
           <div className={phase === "maintain" ? "hidden" : undefined}>
-            <p className="mb-1.5 text-sm font-medium">Pace, lb per week</p>
-            <Segmented label="Weekly loss pace" value={pace} onChange={touch(setPace)} options={paceOptions.map((v) => ({ value: v, label: v }))} />
+            <p className="mb-1.5 text-sm font-medium">Pace per week</p>
+            <Segmented label="Weekly loss pace" value={pace} onChange={touch(setPace)} options={paceOptions.map((v) => ({ value: v, label: paceLabel(v) }))} />
           </div>
           <div>
             <label htmlFor="activity" className="mb-1.5 block text-sm font-medium">
@@ -189,13 +246,30 @@ export function SettingsForm({
             <p className="mb-1.5 text-sm font-medium">Sex</p>
             <Segmented label="Sex" value={sex} onChange={touch(setSex)} options={[{ value: "male", label: "Male" }, { value: "female", label: "Female" }]} />
           </div>
-          <fieldset>
-            <legend className="mb-1.5 text-sm font-medium">Height</legend>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Feet" type="number" inputMode="numeric" suffix="ft" value={f.feet} onChange={set("feet")} />
-              <Field label="Inches" type="number" inputMode="decimal" suffix="in" value={f.inches} onChange={set("inches")} />
-            </div>
-          </fieldset>
+          {units === "metric" ? (
+            <Field label="Height" type="number" inputMode="numeric" suffix="cm" value={f.cm} onChange={set("cm")} />
+          ) : (
+            <fieldset>
+              <legend className="mb-1.5 text-sm font-medium">Height</legend>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Feet" type="number" inputMode="numeric" suffix="ft" value={f.feet} onChange={set("feet")} />
+                <Field label="Inches" type="number" inputMode="decimal" suffix="in" value={f.inches} onChange={set("inches")} />
+              </div>
+            </fieldset>
+          )}
+          <div>
+            <p className="mb-1.5 text-sm font-medium">Units</p>
+            <Segmented
+              label="Units"
+              value={units}
+              onChange={switchUnits}
+              options={[
+                { value: "imperial", label: "lb · oz · ft" },
+                { value: "metric", label: "kg · ml · cm" },
+              ]}
+            />
+            <p className="mt-1.5 text-sm text-muted">Changes how weights, water and height are shown and entered. Your data isn&apos;t changed.</p>
+          </div>
         </Card>
 
         <div className="sticky bottom-[calc(4.75rem+env(safe-area-inset-bottom))] z-10 lg:bottom-4">
@@ -290,4 +364,17 @@ export function SettingsForm({
       </Sheet>
     </>
   );
+}
+
+/** Height fields for the form: feet and inches, or centimetres. */
+function heightFields(heightIn: number, u: Units): { feet: string; inches: string; cm: string } {
+  if (!Number.isFinite(heightIn) || heightIn <= 0) return { feet: "", inches: "", cm: "" };
+  if (u === "metric") return { feet: "", inches: "", cm: String(Math.round(toCm(heightIn))) };
+  const feet = Math.floor(heightIn / 12);
+  return { feet: String(feet), inches: String(Math.round((heightIn - feet * 12) * 10) / 10), cm: "" };
+}
+
+function heightInches(f: { feet: string; inches: string; cm: string }, u: Units): number {
+  if (u === "metric") return f.cm.trim() === "" ? NaN : fromCm(Number(f.cm));
+  return f.feet.trim() === "" ? NaN : Number(f.feet) * 12 + Number(f.inches || 0);
 }

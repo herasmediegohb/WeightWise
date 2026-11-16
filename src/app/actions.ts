@@ -69,6 +69,7 @@ export type ProfileInput = {
   calorieTarget: number;
   proteinTargetG: number;
   waterTargetOz: number;
+  units?: "imperial" | "metric";
 };
 
 export async function saveProfile(input: ProfileInput): Promise<Result> {
@@ -85,13 +86,13 @@ export async function saveProfile(input: ProfileInput): Promise<Result> {
   const calorieTarget = finite(input.calorieTarget, 800, 6000);
   const proteinTargetG = finite(input.proteinTargetG, 20, 400);
   const waterTargetOz = finite(input.waterTargetOz, 16, 300);
-  if (heightIn === null) return fail("Enter a height between 3 and 8 feet.");
-  if (startWeightLb === null || goalWeightLb === null) return fail("Enter weights in pounds.");
+  if (heightIn === null) return fail("Enter a height between 3 and 8 feet (91 and 244 cm).");
+  if (startWeightLb === null || goalWeightLb === null) return fail("Enter your starting and goal weights.");
   if (goalWeightLb >= startWeightLb) return fail("Your goal weight should be below your starting weight.");
   if (pace === null) return fail("Choose a pace between 0.25 and 2 lb per week.");
   if (calorieTarget === null) return fail("Enter a calorie target between 800 and 6000.");
   if (proteinTargetG === null) return fail("Enter a protein target between 20 and 400 g.");
-  if (waterTargetOz === null) return fail("Enter a water target between 16 and 300 oz.");
+  if (waterTargetOz === null) return fail("Enter a water target between 16 and 300 oz (470 and 8,870 ml).");
   if (!["sedentary", "light", "moderate", "active"].includes(input.activityLevel)) {
     return fail("Choose an activity level.");
   }
@@ -109,6 +110,7 @@ export async function saveProfile(input: ProfileInput): Promise<Result> {
     calorieTarget: Math.round(calorieTarget),
     proteinTargetG: Math.round(proteinTargetG),
     waterTargetOz: Math.round(waterTargetOz),
+    units: input.units === "metric" ? ("metric" as const) : ("imperial" as const),
   };
   const db = await getDb();
   await db.insert(schema.profile).values(values).onConflictDoUpdate({ target: schema.profile.id, set: values });
@@ -178,8 +180,8 @@ export async function deleteWeight(id: number): Promise<Result> {
 export async function addWater(input: { date: string; oz: number }): Promise<Result> {
   await assertAuthed();
   if (!isValidDate(input.date)) return fail("Pick a valid date.");
-  const oz = finite(input.oz, 1, 200);
-  if (oz === null) return fail("Enter an amount between 1 and 200 oz.");
+  const oz = finite(input.oz, 1, 203);
+  if (oz === null) return fail("Enter an amount between 1 and 200 oz (30 and 6000 ml).");
   const db = await getDb();
   await db.insert(schema.waterLogs).values({ date: input.date, oz });
   refresh();

@@ -24,6 +24,7 @@ export default async function CoachPage({ searchParams }: { searchParams: Promis
           weekLabel={weekLabel(start)}
           canGenerate={weights.length >= 2}
           currentTarget={p.calorieTarget}
+          units={p.units}
           checkin={
             c && {
               id: c.id,

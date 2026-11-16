@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Minus, Plus } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { deleteWeight, logWeight } from "@/app/actions";
+import { parseWeightInput, weightInputValue, weightUnit, type Units } from "@/lib/units";
 import { Button, Field, IconButton, Sheet } from "./ui";
 
 export type WeightSheetState = {
@@ -19,10 +20,12 @@ export function WeightSheet({
   state,
   onClose,
   today,
+  units,
 }: {
   state: WeightSheetState;
   onClose: () => void;
   today: string;
+  units: Units;
 }) {
   const [shown, setShown] = useState(state);
   const [session, setSession] = useState(0);
@@ -31,7 +34,7 @@ export function WeightSheet({
     setSession(session + 1);
   }
   if (!shown) return null;
-  return <WeightForm key={session} state={shown} open={state !== null} onClose={onClose} today={today} />;
+  return <WeightForm key={session} state={shown} open={state !== null} onClose={onClose} today={today} units={units} />;
 }
 
 function WeightForm({
@@ -39,14 +42,16 @@ function WeightForm({
   open,
   onClose,
   today,
+  units,
 }: {
   state: NonNullable<WeightSheetState>;
   open: boolean;
   onClose: () => void;
   today: string;
+  units: Units;
 }) {
   const [date, setDate] = useState(state.date);
-  const [value, setValue] = useState(state.weightLb !== null ? String(state.weightLb) : "");
+  const [value, setValue] = useState(weightInputValue(state.weightLb, units));
   const [note, setNote] = useState(state.note ?? "");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<"save" | "delete" | null>(null);
@@ -58,13 +63,13 @@ function WeightForm({
   }
 
   async function save() {
-    const n = Number(value);
-    if (!value || !Number.isFinite(n) || n < 50 || n > 800) {
-      setError("Enter a weight between 50 and 800 lb.");
+    const parsed = parseWeightInput(value, units);
+    if ("error" in parsed) {
+      setError(parsed.error);
       return;
     }
     setBusy("save");
-    const res = await logWeight({ date, weightLb: Math.round(n * 10) / 10, note });
+    const res = await logWeight({ date, weightLb: parsed.lb, note });
     setBusy(null);
     if (!res.ok) return setError(res.error);
     toast.success(date === today ? "Weight logged" : "Weight saved");
@@ -94,12 +99,12 @@ function WeightForm({
         }}
       >
         <div className="flex items-center justify-center gap-2 py-4">
-          <IconButton type="button" label="Decrease by 0.2 lb" onClick={() => nudge(-0.2)} className="bg-surface-2">
+          <IconButton type="button" label={`Decrease by ${units === "metric" ? "0.1 kg" : "0.2 lb"}`} onClick={() => nudge(-(units === "metric" ? 0.1 : 0.2))} className="bg-surface-2">
             <Minus size={20} weight="bold" />
           </IconButton>
           <div className="relative">
             <label htmlFor="weight-input" className="sr-only">
-              Weight in pounds
+              Weight in {units === "metric" ? "kilograms" : "pounds"}
             </label>
             <input
               id="weight-input"
@@ -117,9 +122,9 @@ function WeightForm({
               aria-describedby={error ? "weight-error" : undefined}
               className="display w-44 bg-transparent text-center text-6xl font-semibold text-fg placeholder:text-muted/40 focus:outline-none focus-visible:outline-none"
             />
-            <span className="absolute -right-5 bottom-2 text-base font-medium text-muted">lb</span>
+            <span className="absolute -right-5 bottom-2 text-base font-medium text-muted">{weightUnit(units)}</span>
           </div>
-          <IconButton type="button" label="Increase by 0.2 lb" onClick={() => nudge(0.2)} className="ml-4 bg-surface-2">
+          <IconButton type="button" label={`Increase by ${units === "metric" ? "0.1 kg" : "0.2 lb"}`} onClick={() => nudge(units === "metric" ? 0.1 : 0.2)} className="ml-4 bg-surface-2">
             <Plus size={20} weight="bold" />
           </IconButton>
         </div>

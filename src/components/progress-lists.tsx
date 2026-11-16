@@ -7,13 +7,14 @@ import { deleteScan, saveScan } from "@/app/actions";
 import type { BodyScan } from "@/db/schema";
 import type { BodyFatPlan } from "@/lib/calc";
 import { formatFull, formatRange } from "@/lib/dates";
+import { formatWeight, fromWeight, toWeight, weightInputValue, weightNum, weightUnit, type Units } from "@/lib/units";
 import { num, signed } from "@/lib/utils";
 import { Button, Card, Empty, Field, Sheet } from "./ui";
 import { WeightSheet, type WeightSheetState } from "./weight-sheet";
 
 type Row = { id: number; date: string; weightLb: number; note: string | null; trend: number };
 
-export function WeighInHistory({ rows, today }: { rows: Row[]; today: string }) {
+export function WeighInHistory({ rows, today, units }: { rows: Row[]; today: string; units: Units }) {
   const [sheet, setSheet] = useState<WeightSheetState>(null);
   const [all, setAll] = useState(false);
   const shown = all ? rows : rows.slice(0, 7);
@@ -39,7 +40,7 @@ export function WeighInHistory({ rows, today }: { rows: Row[]; today: string }) 
                   <button
                     type="button"
                     onClick={() => setSheet({ id: r.id, date: r.date, weightLb: r.weightLb, note: r.note })}
-                    aria-label={`Edit weigh-in for ${formatFull(r.date)}, ${r.weightLb} pounds`}
+                    aria-label={`Edit weigh-in for ${formatFull(r.date)}, ${formatWeight(r.weightLb, units)}`}
                     className={`flex min-h-14 w-full items-center gap-3 px-5 py-2.5 text-left hover:bg-surface-2 ${!all && rows.length <= 7 && i === shown.length - 1 ? "rounded-b-3xl" : ""}`}
                   >
                     <span className="min-w-0 flex-1">
@@ -47,9 +48,9 @@ export function WeighInHistory({ rows, today }: { rows: Row[]; today: string }) 
                       {r.note && <span className="block truncate text-sm text-muted">{r.note}</span>}
                     </span>
                     {delta !== null && Math.abs(delta) >= 0.05 && (
-                      <span className="text-sm text-muted tnum">{signed(delta)}</span>
+                      <span className="text-sm text-muted tnum">{signed(toWeight(delta, units))}</span>
                     )}
-                    <span className="w-16 shrink-0 text-right font-semibold tnum">{num(r.weightLb)}</span>
+                    <span className="w-16 shrink-0 text-right font-semibold tnum">{weightNum(r.weightLb, units)}</span>
                   </button>
                 </li>
               );
@@ -66,24 +67,38 @@ export function WeighInHistory({ rows, today }: { rows: Row[]; today: string }) 
           )}
         </>
       )}
-      <WeightSheet state={sheet} onClose={() => setSheet(null)} today={today} />
+      <WeightSheet state={sheet} onClose={() => setSheet(null)} today={today} units={units} />
     </Card>
   );
 }
 
 const SCAN_FIELDS = [
   { key: "bodyFatPct", label: "Body fat", unit: "%", lowerIsBetter: true },
-  { key: "muscleMassLb", label: "Muscle mass", unit: "lb", lowerIsBetter: false },
-  { key: "leanMassLb", label: "Lean mass", unit: "lb", lowerIsBetter: false },
-  { key: "fatMassLb", label: "Fat mass", unit: "lb", lowerIsBetter: true },
+  { key: "muscleMassLb", label: "Muscle mass", unit: "mass", lowerIsBetter: false },
+  { key: "leanMassLb", label: "Lean mass", unit: "mass", lowerIsBetter: false },
+  { key: "fatMassLb", label: "Fat mass", unit: "mass", lowerIsBetter: true },
   { key: "visceralFatLevel", label: "Visceral fat", unit: "level", lowerIsBetter: true },
   { key: "waterPct", label: "Body water", unit: "%", lowerIsBetter: false },
   { key: "bmrKcal", label: "BMR", unit: "kcal", lowerIsBetter: false },
 ] as const;
 
 type ScanKey = (typeof SCAN_FIELDS)[number]["key"];
+const FIELD = Object.fromEntries(SCAN_FIELDS.map((f) => [f.key, f])) as Record<ScanKey, (typeof SCAN_FIELDS)[number]>;
 
-export function BodyComposition({ scans, today, plan }: { scans: BodyScan[]; today: string; plan: BodyFatPlan | null }) {
+export function BodyComposition({
+  scans,
+  today,
+  plan,
+  units,
+}: {
+  scans: BodyScan[];
+  today: string;
+  plan: BodyFatPlan | null;
+  units: Units;
+}) {
+  /** Mass measures are stored in pounds; everything else is shown as recorded. */
+  const show = (key: ScanKey, v: number) => (FIELD[key].unit === "mass" ? toWeight(v, units) : v);
+  const unitLabel = (key: ScanKey) => (FIELD[key].unit === "mass" ? weightUnit(units) : FIELD[key].unit);
   const [editing, setEditing] = useState<BodyScan | "new" | null>(null);
   const newestFirst = [...scans].reverse();
 
@@ -114,14 +129,14 @@ export function BodyComposition({ scans, today, plan }: { scans: BodyScan[]; tod
             {SCAN_FIELDS.map((f) => {
               const { cur, prev } = latest(f.key);
               if (!cur) return null;
-              const delta = prev ? (cur[f.key] as number) - (prev[f.key] as number) : null;
+              const delta = prev ? show(f.key, cur[f.key] as number) - show(f.key, prev[f.key] as number) : null;
               const good = delta !== null && delta !== 0 && delta < 0 === f.lowerIsBetter;
               return (
                 <div key={f.key}>
                   <dt className="text-sm text-muted">{f.label}</dt>
                   <dd className="mt-0.5 tnum">
-                    <span className="text-2xl font-semibold tracking-tight">{num(cur[f.key])}</span>
-                    <span className="ml-1 text-sm text-muted">{f.unit}</span>
+                    <span className="text-2xl font-semibold tracking-tight">{num(show(f.key, cur[f.key] as number))}</span>
+                    <span className="ml-1 text-sm text-muted">{unitLabel(f.key)}</span>
                     {delta !== null && Math.abs(delta) >= 0.05 && (
                       <span className={`ml-2 text-sm font-medium ${good ? "text-accent" : "text-muted"}`}>{signed(delta)}</span>
                     )}
@@ -135,7 +150,7 @@ export function BodyComposition({ scans, today, plan }: { scans: BodyScan[]; tod
               <h3 className="font-semibold">Body-fat milestones</h3>
               <p className="mt-1 text-sm leading-relaxed text-muted">
                 About <span className="font-semibold text-fg tnum">{num(plan.estimatedPct)}%</span> now, estimated from your trend weight
-                and {num(plan.leanMassLb)} lb of lean mass ({plan.leanSource === "measured" ? "measured in" : "worked out from"} your{" "}
+                and {formatWeight(plan.leanMassLb, units)} of lean mass ({plan.leanSource === "measured" ? "measured in" : "worked out from"} your{" "}
                 {formatFull(plan.scanDate)} scan). Dates assume you keep that lean mass, which enough protein and strength training help with.
               </p>
               <ul className="mt-3 space-y-2">
@@ -143,7 +158,7 @@ export function BodyComposition({ scans, today, plan }: { scans: BodyScan[]; tod
                   <li key={m.pct} className="flex items-center gap-3 rounded-2xl bg-surface-2 px-3.5 py-2.5">
                     <span className="w-12 shrink-0 text-lg font-semibold tnum">{m.pct}%</span>
                     <span className="min-w-0 flex-1 text-sm tnum">
-                      <span className="block font-medium">at {num(m.weight)} lb</span>
+                      <span className="block font-medium">at {formatWeight(m.weight, units)}</span>
                       <span className="block text-muted">
                         {m.reached
                           ? "Reached, by this estimate"
@@ -169,7 +184,7 @@ export function BodyComposition({ scans, today, plan }: { scans: BodyScan[]; tod
                 >
                   <span className="font-medium">{formatFull(s.date)}</span>
                   <span className="text-sm text-muted tnum">
-                    {[s.bodyFatPct !== null && `${num(s.bodyFatPct)}% fat`, s.muscleMassLb !== null && `${num(s.muscleMassLb)} lb muscle`]
+                    {[s.bodyFatPct !== null && `${num(s.bodyFatPct)}% fat`, s.muscleMassLb !== null && `${formatWeight(s.muscleMassLb, units)} muscle`]
                       .filter(Boolean)
                       .join(" · ") || "Edit"}
                   </span>
@@ -190,6 +205,7 @@ export function BodyComposition({ scans, today, plan }: { scans: BodyScan[]; tod
             key={editing === "new" ? "new" : editing.id}
             scan={editing === "new" ? null : editing}
             today={today}
+            units={units}
             onClose={() => setEditing(null)}
           />
         )}
@@ -198,10 +214,17 @@ export function BodyComposition({ scans, today, plan }: { scans: BodyScan[]; tod
   );
 }
 
-function ScanForm({ scan, today, onClose }: { scan: BodyScan | null; today: string; onClose: () => void }) {
+function ScanForm({ scan, today, units, onClose }: { scan: BodyScan | null; today: string; units: Units; onClose: () => void }) {
   const [date, setDate] = useState(scan?.date ?? today);
   const [vals, setVals] = useState<Record<ScanKey, string>>(
-    () => Object.fromEntries(SCAN_FIELDS.map((f) => [f.key, scan?.[f.key] != null ? String(scan[f.key]) : ""])) as Record<ScanKey, string>,
+    () =>
+      Object.fromEntries(
+        SCAN_FIELDS.map((f) => {
+          const v = scan?.[f.key];
+          if (v === null || v === undefined) return [f.key, ""];
+          return [f.key, f.unit === "mass" ? weightInputValue(v, units) : String(v)];
+        }),
+      ) as Record<ScanKey, string>,
   );
   const [busy, setBusy] = useState<"save" | "delete" | null>(null);
 
@@ -212,7 +235,15 @@ function ScanForm({ scan, today, onClose }: { scan: BodyScan | null; today: stri
       onSubmit={async (e) => {
         e.preventDefault();
         setBusy("save");
-        const res = await saveScan({ date, ...vals });
+        // Mass fields are typed in display units and stored in pounds.
+        const toStore = Object.fromEntries(
+          SCAN_FIELDS.map((f) => {
+            const raw = vals[f.key];
+            if (f.unit !== "mass" || raw.trim() === "" || !Number.isFinite(Number(raw))) return [f.key, raw];
+            return [f.key, String(Math.round(fromWeight(Number(raw), units) * 100) / 100)];
+          }),
+        );
+        const res = await saveScan({ date, ...toStore });
         setBusy(null);
         if (!res.ok) return toast.error(res.error);
         toast.success("Scan saved");
@@ -228,7 +259,7 @@ function ScanForm({ scan, today, onClose }: { scan: BodyScan | null; today: stri
             type="number"
             inputMode="decimal"
             step="0.1"
-            suffix={f.unit}
+            suffix={f.unit === "mass" ? weightUnit(units) : f.unit}
             value={vals[f.key]}
             onChange={(e) => setVals({ ...vals, [f.key]: e.target.value })}
           />

@@ -8,6 +8,7 @@ import { MIN_COMPLETE_DAY_KCAL, bmiCategory, maintenanceStatus } from "@/lib/cal
 import { getOverview, getProfile, getScans } from "@/lib/data";
 import { addDays, diffDays, formatFull, formatRange } from "@/lib/dates";
 import { getClock } from "@/lib/session";
+import { formatWeight, toWeight, weightNum, weightUnit } from "@/lib/units";
 import { cn, int, num, signed } from "@/lib/utils";
 
 export const metadata = { title: "Progress" };
@@ -30,22 +31,27 @@ export default async function ProgressPage() {
       const w = o.weights.find((x) => x.date === pt.date)!;
       return { id: w.id, date: w.date, weightLb: w.weightLb, note: w.note, trend: pt.trend };
     });
+  const u = p.units;
+  const wu = weightUnit(u);
+  const w = (lb: number) => formatWeight(lb, u);
+  /** Signed rate or change, in display units (kg rates get two decimals). */
+  const sw = (lb: number) => signed(toWeight(lb, u), u === "metric" ? 2 : 1);
   const maint = p.phase === "maintain" ? maintenanceStatus(o.currentTrend, p.goalWeightLb) : null;
   const impliedPace = ((e.kcal - p.calorieTarget) * 7) / 3500;
 
   const tiles = [
-    { label: "Lost so far", value: `${num(Math.max(0, o.lost))} lb`, sub: `since ${formatFull(p.startDate)}` },
+    { label: "Lost so far", value: w(Math.max(0, o.lost)), sub: `since ${formatFull(p.startDate)}` },
     {
       label: "Weekly rate",
-      value: o.range === null ? "–" : `${signed(o.range.rate)} lb`,
-      sub: o.range === null ? "needs more weigh-ins" : `likely ${signed(o.range.fast)} to ${signed(o.range.slow)}, target ${signed(-p.paceLbPerWeek)}`,
+      value: o.range === null ? "–" : `${sw(o.range.rate)} ${wu}`,
+      sub: o.range === null ? "needs more weigh-ins" : `likely ${sw(o.range.fast)} to ${sw(o.range.slow)}, target ${sw(-p.paceLbPerWeek)}`,
     },
     { label: "BMI", value: num(o.bmi), sub: bmiCategory(o.bmi) },
     p.phase === "maintain"
       ? {
           label: "Maintenance",
-          value: maint!.state === "in" ? "In range" : `${num(maint!.offBy)} lb ${maint!.state}`,
-          sub: `range ${num(maint!.low)} to ${num(maint!.high)} lb`,
+          value: maint!.state === "in" ? "In range" : `${w(maint!.offBy)} ${maint!.state}`,
+          sub: `range ${weightNum(maint!.low, u)} to ${w(maint!.high)}`,
         }
       : {
       label: "Goal date",
@@ -59,19 +65,19 @@ export default async function ProgressPage() {
   return (
     <div>
       <h1 className="mb-5 text-3xl font-semibold tracking-tight">Progress</h1>
-      <div className="rise grid gap-4 lg:grid-cols-2 lg:items-start">
+      <div className="rise grid gap-4 lg:grid-cols-2 lg:items-start [&>*]:min-w-0">
         <Card className="lg:col-span-2">
           <div className="mb-4 flex items-baseline gap-2">
-            <span className="display text-4xl font-semibold">{num(o.currentTrend)}</span>
-            <span className="text-muted">lb trend</span>
+            <span className="display text-4xl font-semibold">{weightNum(o.currentTrend, u)}</span>
+            <span className="text-muted">{wu} trend</span>
             <span className="ml-auto text-sm text-muted tnum">
-              {num(p.startWeightLb)} → {num(p.goalWeightLb)} lb
+              {weightNum(p.startWeightLb, u)} → {w(p.goalWeightLb)}
             </span>
           </div>
-          <WeightChart points={o.points} goal={p.goalWeightLb} today={today} />
+          <WeightChart points={o.points} goal={p.goalWeightLb} today={today} units={u} />
         </Card>
 
-        <dl className="grid grid-cols-2 gap-4 lg:col-span-2 lg:grid-cols-4">
+        <dl className="grid grid-cols-2 gap-4 lg:col-span-2 lg:grid-cols-4 [&>*]:min-w-0">
           {tiles.map((t) => (
             <div key={t.label} className="rounded-3xl border border-border bg-surface p-4 shadow-card">
               <dt className="text-[13px] font-medium text-muted">{t.label}</dt>
@@ -117,7 +123,7 @@ export default async function ProgressPage() {
             </div>
             <div>
               <dt className="text-muted">Target implies</dt>
-              <dd className="mt-0.5 font-semibold tnum">{signed(-impliedPace)} lb/wk</dd>
+              <dd className="mt-0.5 font-semibold tnum">{sw(-impliedPace)} {wu}/wk</dd>
             </div>
           </dl>
         </Card>
@@ -163,8 +169,8 @@ export default async function ProgressPage() {
                       {done
                         ? `Reached ${formatFull(m.achievedOn!)}${m.achievedOn! > p.startDate ? `, day ${diffDays(m.achievedOn!, p.startDate)}` : ""}`
                         : m.projectedOn
-                          ? `${num(o.currentTrend - m.weight)} lb to go, projected ${formatFull(m.projectedOn)}`
-                          : `${num(o.currentTrend - m.weight)} lb to go`}
+                          ? `${w(o.currentTrend - m.weight)} to go, projected ${formatFull(m.projectedOn)}`
+                          : `${w(o.currentTrend - m.weight)} to go`}
                     </p>
                   </div>
                 </li>
@@ -174,8 +180,8 @@ export default async function ProgressPage() {
         </Card>
 
         <div className="grid gap-4">
-          <BodyComposition scans={scans} today={today} plan={o.bodyFat} />
-          <WeighInHistory rows={history} today={today} />
+          <BodyComposition scans={scans} today={today} plan={o.bodyFat} units={u} />
+          <WeighInHistory rows={history} today={today} units={u} />
         </div>
       </div>
     </div>

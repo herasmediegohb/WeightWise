@@ -189,6 +189,7 @@ export async function getOverview(p: Profile, today: string) {
     points,
     range,
     today,
+    units: p.units,
   });
   const lastFatScan = [...scans].reverse().find((sc) => sc.bodyFatPct !== null) ?? null;
   const bodyFat = bodyFatPlan({ scan: lastFatScan, points, currentTrend, range, today });

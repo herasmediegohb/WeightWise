@@ -7,7 +7,8 @@ import { logWeight } from "@/app/actions";
 import type { MaintenanceStatus, TrendPoint } from "@/lib/calc";
 import { BandBar } from "./phase-cards";
 import { formatShort } from "@/lib/dates";
-import { cn, num, signed } from "@/lib/utils";
+import { formatWeight, parseWeightInput, toWeight, weightNum, weightUnit, type Units } from "@/lib/units";
+import { cn, signed } from "@/lib/utils";
 import { Bar, Button, Card, Eyebrow, IconButton } from "./ui";
 import { WeightSheet, type WeightSheetState } from "./weight-sheet";
 
@@ -52,6 +53,7 @@ export function WeightHero({
   startWeight,
   goalWeight,
   maintenance,
+  units,
   className,
 }: {
   today: string;
@@ -68,6 +70,7 @@ export function WeightHero({
   goalWeight: number;
   /** In maintenance, the range bar replaces the progress-to-goal bar. */
   maintenance?: MaintenanceStatus | null;
+  units: Units;
   className?: string;
 }) {
   const [sheet, setSheet] = useState<WeightSheetState>(null);
@@ -77,17 +80,18 @@ export function WeightHero({
   const losing = rate !== null && rate < -0.05;
   const gaining = rate !== null && rate > 0.05;
   const change = todayLog && previous ? todayLog.weightLb - previous.weightLb : null;
+  const wu = weightUnit(units);
 
   function save(e: React.FormEvent) {
     e.preventDefault();
-    const n = Number(value);
-    if (!value || !Number.isFinite(n) || n < 50 || n > 800) {
-      setError("Enter a weight between 50 and 800 lb.");
+    const parsed = parseWeightInput(value, units);
+    if ("error" in parsed) {
+      setError(parsed.error);
       return;
     }
     setError("");
     startSaving(async () => {
-      const res = await logWeight({ date: today, weightLb: Math.round(n * 10) / 10 });
+      const res = await logWeight({ date: today, weightLb: parsed.lb });
       if (!res.ok) {
         setError(res.error);
         return;
@@ -109,7 +113,7 @@ export function WeightHero({
             )}
           >
             {gaining ? <TrendUp size={16} weight="bold" aria-hidden /> : <TrendDown size={16} weight="bold" aria-hidden />}
-            {signed(rate)} lb/wk
+            {signed(toWeight(rate, units), units === "metric" ? 2 : 1)} {wu}/wk
           </span>
         )}
       </div>
@@ -117,8 +121,8 @@ export function WeightHero({
       {todayLog ? (
         <div className="mt-1">
           <div className="flex items-baseline gap-1.5">
-            <span className="display text-6xl font-semibold">{num(todayLog.weightLb)}</span>
-            <span className="text-lg font-medium text-muted">lb</span>
+            <span className="display text-6xl font-semibold">{weightNum(todayLog.weightLb, units)}</span>
+            <span className="text-lg font-medium text-muted">{wu}</span>
             <IconButton
               label="Edit today's weight"
               className="ml-1 self-center text-muted"
@@ -135,7 +139,7 @@ export function WeightHero({
               <>Same as {formatShort(previous!.date)}</>
             ) : (
               <>
-                <span className={cn("font-semibold", change < 0 ? "text-accent" : "text-fg")}>{signed(change)} lb</span>
+                <span className={cn("font-semibold", change < 0 ? "text-accent" : "text-fg")}>{signed(toWeight(change, units))} {wu}</span>
                 since {formatShort(previous!.date)}
               </>
             )}
@@ -146,7 +150,7 @@ export function WeightHero({
           <div className="flex items-stretch gap-2">
             <div className="relative min-w-0 flex-1">
               <label htmlFor="today-weight" className="sr-only">
-                Today&apos;s weight in pounds
+                Today&apos;s weight in {units === "metric" ? "kilograms" : "pounds"}
               </label>
               <input
                 id="today-weight"
@@ -154,7 +158,7 @@ export function WeightHero({
                 inputMode="decimal"
                 step="0.1"
                 enterKeyHint="done"
-                placeholder={previous ? num(previous.weightLb) : "0.0"}
+                placeholder={previous ? weightNum(previous.weightLb, units) : "0.0"}
                 value={value}
                 onChange={(e) => {
                   setValue(e.target.value);
@@ -165,7 +169,7 @@ export function WeightHero({
                 className="display h-16 w-full rounded-2xl border border-border bg-surface-2 pl-4 pr-12 text-4xl font-semibold text-fg placeholder:text-muted/40 transition-colors focus:border-accent focus:outline-none focus-visible:outline-none"
               />
               <span className="pointer-events-none absolute inset-y-0 right-4 grid place-items-center text-base font-medium text-muted">
-                lb
+                {wu}
               </span>
             </div>
             <Button type="submit" size="lg" className="h-16 px-6" loading={saving} disabled={!value}>
@@ -178,7 +182,7 @@ export function WeightHero({
             </p>
           ) : (
             <p id="today-weight-hint" className="mt-2 text-sm text-muted tnum">
-              {previous ? `Last weigh-in ${num(previous.weightLb)} lb on ${formatShort(previous.date)}. ` : ""}
+              {previous ? `Last weigh-in ${formatWeight(previous.weightLb, units)} on ${formatShort(previous.date)}. ` : ""}
               <button
                 type="button"
                 onClick={() => setSheet({ date: today, weightLb: null })}
@@ -196,8 +200,8 @@ export function WeightHero({
           Trend weight <span className="text-xs">(smooths out daily swings)</span>
         </p>
         <p className="tnum">
-          <span className="text-xl font-semibold">{num(latest?.trend ?? startWeight)}</span>
-          <span className="ml-1 text-sm text-muted">lb</span>
+          <span className="text-xl font-semibold">{weightNum(latest?.trend ?? startWeight, units)}</span>
+          <span className="ml-1 text-sm text-muted">{wu}</span>
         </p>
       </div>
 
@@ -208,13 +212,13 @@ export function WeightHero({
       {maintenance ? (
         <div className="mt-4">
           <p className="mb-2 text-sm text-muted">
-            Maintaining <span className="font-semibold text-fg tnum">{num(goalWeight)} lb</span>
+            Maintaining <span className="font-semibold text-fg tnum">{formatWeight(goalWeight, units)}</span>
           </p>
           <BandBar
             status={maintenance}
             trend={latest?.trend ?? goalWeight}
             goal={goalWeight}
-            labels={{ low: `${num(maintenance.low)} lb`, high: `${num(maintenance.high)} lb`, offBy: `${num(maintenance.offBy)} lb` }}
+            labels={{ low: formatWeight(maintenance.low, units), high: formatWeight(maintenance.high, units), offBy: formatWeight(maintenance.offBy, units) }}
           />
         </div>
       ) : (
@@ -222,15 +226,15 @@ export function WeightHero({
         <Bar value={progress} label={`${Math.round(progress * 100)}% of the way to your goal weight`} />
         <div className="mt-2 flex justify-between text-sm tnum">
           <span>
-            <span className="font-semibold">{num(Math.max(0, lost))} lb</span> <span className="text-muted">lost</span>
+            <span className="font-semibold">{formatWeight(Math.max(0, lost), units)}</span> <span className="text-muted">lost</span>
           </span>
           <span>
-            <span className="font-semibold">{num(remaining)} lb</span> <span className="text-muted">to {num(goalWeight)}</span>
+            <span className="font-semibold">{formatWeight(remaining, units)}</span> <span className="text-muted">to {weightNum(goalWeight, units)}</span>
           </span>
         </div>
       </div>
       )}
-      <WeightSheet state={sheet} onClose={() => setSheet(null)} today={today} />
+      <WeightSheet state={sheet} onClose={() => setSheet(null)} today={today} units={units} />
     </Card>
   );
 }

@@ -15,7 +15,7 @@ import { getCheckins, getFrequentFoods, getMealsForDay, getOverview, getProfile,
 import { addDays, formatFull, formatLong, formatRange } from "@/lib/dates";
 import { mealForHour } from "@/lib/meals";
 import { getClock } from "@/lib/session";
-import { num } from "@/lib/utils";
+import { formatWeight } from "@/lib/units";
 
 export default async function TodayPage() {
   const p = await getProfile();
@@ -59,7 +59,7 @@ export default async function TodayPage() {
         </h1>
       </header>
 
-      <div className="rise grid gap-4 lg:grid-cols-2 lg:items-start">
+      <div className="rise grid gap-4 lg:grid-cols-2 lg:items-start [&>*]:min-w-0">
         <WeightHero
           today={today}
           latest={o.latest}
@@ -73,8 +73,9 @@ export default async function TodayPage() {
           startWeight={p.startWeightLb}
           goalWeight={p.goalWeightLb}
           maintenance={maintenance}
+          units={p.units}
         />
-        <WaterCard date={today} total={water} target={p.waterTargetOz} lastOz={waterRows[0]?.oz ?? null} />
+        <WaterCard date={today} total={water} target={p.waterTargetOz} lastOz={waterRows[0]?.oz ?? null} units={p.units} />
         <NutritionCard
           date={today}
           eaten={totals.calories}
@@ -89,7 +90,7 @@ export default async function TodayPage() {
         />
 
         <div className="grid gap-4">
-          {reachedGoal && <GoalReachedCard goalLabel={`${num(p.goalWeightLb)} lb`} />}
+          {reachedGoal && <GoalReachedCard goalLabel={formatWeight(p.goalWeightLb, p.units)} />}
           {next && (
             <Card>
               <div className="flex items-center justify-between">
@@ -103,12 +104,12 @@ export default async function TodayPage() {
               </div>
               <p className="mt-2 text-2xl font-semibold tracking-tight">{next.label}</p>
               <p className="mt-1 text-[15px] text-muted tnum">
-                <span className="font-semibold text-fg">{num(Math.max(0, o.currentTrend - next.weight))} lb</span> to go
+                <span className="font-semibold text-fg">{formatWeight(Math.max(0, o.currentTrend - next.weight), p.units)}</span> to go
                 {next.projectedOn ? `, on track for ${formatFull(next.projectedOn)}` : ""}
               </p>
               {o.goal.date && (
                 <p className="mt-3 border-t border-border pt-3 text-sm text-muted">
-                  Goal weight of {num(p.goalWeightLb)} lb projected for{" "}
+                  Goal weight of {formatWeight(p.goalWeightLb, p.units)} projected for{" "}
                   <span className="font-medium text-fg">{formatFull(o.goal.date)}</span>
                   {o.goal.early && <>, likely {formatRange(o.goal.early, o.goal.late)}</>}
                   {o.range && <> ({o.range.confidence} confidence)</>}.

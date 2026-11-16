@@ -7,6 +7,7 @@ import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
 import { applyCheckinTarget } from "@/app/actions";
 import type { CheckinStats } from "@/db/schema";
+import { formatWater, toWeight, weightUnit, type Units } from "@/lib/units";
 import { int, signed } from "@/lib/utils";
 import { Button, Card, Eyebrow } from "./ui";
 
@@ -24,7 +25,9 @@ export function CheckinCard({
   weekLabel,
   canGenerate,
   currentTarget,
+  units,
 }: {
+  units: Units;
   checkin: CheckinView;
   weekLabel: string;
   canGenerate: boolean;
@@ -72,12 +75,12 @@ export function CheckinCard({
   const showTarget =
     checkin.suggestedCalories !== null && !checkin.applied && Math.abs(checkin.suggestedCalories - currentTarget) >= 50;
   const chips = [
-    s.trendChange !== null && { k: "Trend", v: `${signed(s.trendChange)} lb` },
+    s.trendChange !== null && { k: "Trend", v: `${signed(toWeight(s.trendChange, units))} ${weightUnit(units)}` },
     { k: "Weigh-ins", v: String(s.weighIns) },
     { k: "Days logged", v: `${s.daysLogged}/7` },
     s.avgCalories !== null && { k: "Avg kcal", v: int(s.avgCalories) },
     s.avgProtein !== null && { k: "Avg protein", v: `${s.avgProtein} g` },
-    s.avgWaterOz !== null && { k: "Avg water", v: `${s.avgWaterOz} oz` },
+    s.avgWaterOz !== null && { k: "Avg water", v: formatWater(s.avgWaterOz, units) },
   ].filter(Boolean) as { k: string; v: string }[];
 
   return (

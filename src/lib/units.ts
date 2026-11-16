@@ -40,3 +40,18 @@ export const waterQuickAdds = (u: Units) => (u === "metric" ? [250, 350, 500, 75
 
 export const toCm = (inches: number) => inches * CM_PER_IN;
 export const fromCm = (cm: number) => cm / CM_PER_IN;
+
+/** Typed weight (display units) to pounds, rounded to what the display can show. */
+export function parseWeightInput(raw: string, u: Units): { lb: number } | { error: string } {
+  const n = Number(raw);
+  const [min, max] = u === "metric" ? [23, 363] : [50, 800];
+  if (!raw.trim() || !Number.isFinite(n) || n < min || n > max) {
+    return { error: `Enter a weight between ${min} and ${max} ${weightUnit(u)}.` };
+  }
+  const rounded = Math.round(n * 10) / 10;
+  return { lb: Math.round(fromWeight(rounded, u) * 10000) / 10000 };
+}
+
+/** A pounds value shown in an input, in display units with one decimal. */
+export const weightInputValue = (lb: number | null | undefined, u: Units) =>
+  lb === null || lb === undefined ? "" : String(Math.round(toWeight(lb, u) * 10) / 10);

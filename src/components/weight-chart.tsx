@@ -14,6 +14,7 @@ import {
 } from "recharts";
 import type { TrendPoint } from "@/lib/calc";
 import { DAY, formatFull, formatShort, fromMs, toMs } from "@/lib/dates";
+import { toWeight, weightUnit, type Units } from "@/lib/units";
 import { num } from "@/lib/utils";
 import { Segmented } from "./ui";
 
@@ -24,13 +25,25 @@ const RANGES = [
   { value: "all", label: "All" },
 ];
 
-export function WeightChart({ points, goal, today }: { points: TrendPoint[]; goal: number; today: string }) {
+export function WeightChart({
+  points,
+  goal: goalLb,
+  today,
+  units,
+}: {
+  points: TrendPoint[];
+  goal: number;
+  today: string;
+  units: Units;
+}) {
   const [range, setRange] = useState("90");
+  const goal = Math.round(toWeight(goalLb, units) * 10) / 10;
+  const wu = weightUnit(units);
 
   const data = useMemo(() => {
     const from = range === "all" ? 0 : toMs(today) - Number(range) * DAY;
-    return points.filter((p) => toMs(p.date) >= from).map((p) => ({ t: toMs(p.date), weight: p.weight, trend: p.trend }));
-  }, [points, range, today]);
+    return points.filter((p) => toMs(p.date) >= from).map((p) => ({ t: toMs(p.date), weight: toWeight(p.weight, units), trend: toWeight(p.trend, units) }));
+  }, [points, range, today, units]);
 
   const domain = useMemo(() => {
     if (!data.length) return [0, 1];
@@ -45,7 +58,7 @@ export function WeightChart({ points, goal, today }: { points: TrendPoint[]; goa
 
   return (
     <div>
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-4 text-sm text-muted">
           <span className="flex items-center gap-1.5">
             <span className="h-0.5 w-4 rounded-full bg-accent" aria-hidden /> Trend
@@ -54,7 +67,7 @@ export function WeightChart({ points, goal, today }: { points: TrendPoint[]; goa
             <span className="size-2 rounded-full bg-muted/60" aria-hidden /> Scale
           </span>
         </div>
-        <Segmented label="Chart range" value={range} onChange={setRange} options={RANGES} className="w-48" />
+        <Segmented label="Chart range" value={range} onChange={setRange} options={RANGES} className="w-full min-[400px]:w-48" />
       </div>
       {data.length < 2 ? (
         <p className="grid h-56 place-items-center text-center text-sm text-muted">
@@ -64,7 +77,7 @@ export function WeightChart({ points, goal, today }: { points: TrendPoint[]; goa
         <div
           className="mt-3 h-60 w-full"
           role="img"
-          aria-label={`Weight chart. Trend moved from ${num(data[0].trend)} to ${num(data[data.length - 1].trend)} pounds between ${formatFull(fromMs(data[0].t))} and ${formatFull(fromMs(data[data.length - 1].t))}.`}
+          aria-label={`Weight chart. Trend moved from ${num(data[0].trend)} to ${num(data[data.length - 1].trend)} ${wu === "kg" ? "kilograms" : "pounds"} between ${formatFull(fromMs(data[0].t))} and ${formatFull(fromMs(data[data.length - 1].t))}.`}
         >
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -18 }}>
@@ -97,8 +110,8 @@ export function WeightChart({ points, goal, today }: { points: TrendPoint[]; goa
                   return (
                     <div className="rounded-xl border border-border bg-surface px-3 py-2 text-sm shadow-card">
                       <p className="text-muted">{formatFull(fromMs(d.t))}</p>
-                      <p className="mt-0.5 font-semibold tnum">Trend {num(d.trend)} lb</p>
-                      <p className="text-muted tnum">Scale {num(d.weight)} lb</p>
+                      <p className="mt-0.5 font-semibold tnum">Trend {num(d.trend)} {wu}</p>
+                      <p className="text-muted tnum">Scale {num(d.weight)} {wu}</p>
                     </div>
                   );
                 }}

@@ -3,6 +3,7 @@ import type { CheckinStats, Profile } from "@/db/schema";
 import { MAINTAIN_BAND_LB, avg, maintenanceStatus, round, suggestTarget, trendAt, MIN_COMPLETE_DAY_KCAL } from "./calc";
 import { getFoodForDay, getOverview, getScans, getWaterTotals } from "./data";
 import { addDays, formatShort, weekStart } from "./dates";
+import { formatWater, formatWeight } from "./units";
 
 export const COACH_SYSTEM = `You are the coach inside WeightWise, a personal weight and nutrition tracker used by one person. Their profile and logged data are provided below, and they are the person you are talking to.
 
@@ -36,6 +37,12 @@ export async function buildCoachContext(p: Profile, today: string): Promise<stri
 
   let out = `<profile>\n`;
   out += line("Name", p.name);
+  out += line(
+    "Preferred units",
+    p.units === "metric"
+      ? "metric. All data below is in pounds and fluid ounces; convert to kilograms and millilitres in your replies"
+      : "pounds and fluid ounces",
+  );
   out += line("Today", today);
   out += line("Age", o.age);
   out += line("Sex", p.sex);
@@ -176,23 +183,25 @@ export async function buildCheckinStats(p: Profile, today: string, start: string
 export function fallbackCheckinSummary(
   s: CheckinStats,
   suggested: number,
-  p?: Pick<Profile, "phase" | "goalWeightLb">,
+  p?: Pick<Profile, "phase" | "goalWeightLb" | "units">,
 ): { headline: string; summary: string } {
   const parts: string[] = [];
   const maintaining = p?.phase === "maintain";
+  const u = p?.units ?? "imperial";
+  const w = (lb: number) => formatWeight(lb, u);
   if (maintaining && s.trendEnd !== null && p) {
     const m = maintenanceStatus(s.trendEnd, p.goalWeightLb);
     parts.push(
       m.state === "in"
-        ? `Your trend weight ended the week at **${s.trendEnd} lb**, inside your maintenance range of ${m.low} to ${m.high} lb.`
-        : `Your trend weight ended the week at **${s.trendEnd} lb**, ${m.offBy} lb ${m.state} your maintenance range of ${m.low} to ${m.high} lb.`,
+        ? `Your trend weight ended the week at **${w(s.trendEnd)}**, inside your maintenance range of ${w(m.low)} to ${w(m.high)}.`
+        : `Your trend weight ended the week at **${w(s.trendEnd)}**, ${w(m.offBy)} ${m.state} your maintenance range of ${w(m.low)} to ${w(m.high)}.`,
     );
   } else if (s.trendChange !== null) {
     parts.push(
       s.trendChange < -0.05
-        ? `Your trend weight dropped **${Math.abs(s.trendChange)} lb** this week, against a target pace of ${s.targetPace} lb.`
+        ? `Your trend weight dropped **${w(Math.abs(s.trendChange))}** this week, against a target pace of ${w(s.targetPace)}.`
         : s.trendChange > 0.05
-          ? `Your trend weight rose **${s.trendChange} lb** this week.`
+          ? `Your trend weight rose **${w(s.trendChange)}** this week.`
           : `Your trend weight held steady this week.`,
     );
   } else parts.push(`There weren't enough weigh-ins to measure this week's change (${s.weighIns} logged). Weighing in most mornings gives the trend something to work with.`);
@@ -201,7 +210,7 @@ export function fallbackCheckinSummary(
       ? `You logged food on **${s.daysLogged} of 7 days**, averaging ${s.avgCalories} kcal and ${s.avgProtein} g protein.`
       : `No complete days of food were logged, so intake can't be assessed.`,
   );
-  if (s.avgWaterOz !== null) parts.push(`Water averaged ${s.avgWaterOz} oz on the days you tracked it.`);
+  if (s.avgWaterOz !== null) parts.push(`Water averaged ${formatWater(s.avgWaterOz, u)} on the days you tracked it.`);
   parts.push(
     Math.abs(suggested - s.currentCalorieTarget) >= 50
       ? `Based on an estimated expenditure of ${s.expenditure} kcal, a target of **${suggested} kcal** ${maintaining ? "fits maintenance" : "matches your chosen pace"}.`
@@ -215,9 +224,9 @@ export function fallbackCheckinSummary(
       : s.trendChange === null
       ? "Not enough weigh-ins this week"
       : s.trendChange < -0.05
-        ? `Down ${Math.abs(s.trendChange)} lb this week`
+        ? `Down ${w(Math.abs(s.trendChange))} this week`
         : s.trendChange > 0.05
-          ? `Up ${s.trendChange} lb this week`
+          ? `Up ${w(s.trendChange)} this week`
           : "Holding steady this week";
   return { headline, summary: parts.join("\n\n") };
 }

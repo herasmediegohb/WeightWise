@@ -1,4 +1,5 @@
 import { DAY, addDays, diffDays, fromMs, toMs } from "./dates";
+import { formatWeight, fromWeight, toWeight, weightUnit, type Units } from "./units";
 
 export const KCAL_PER_LB = 3500;
 /** Smoothing time constant for the trend weight, in days. */
@@ -175,14 +176,18 @@ export function buildMilestones(opts: {
   points: TrendPoint[];
   range: RateRange | null;
   today: string;
+  /** Imperial: every 5 lb. Metric: every 2 kg, on round kilograms. */
+  units?: Units;
 }): Milestone[] {
-  const { startWeight, goalWeight, heightIn, points, range, today } = opts;
+  const { startWeight, goalWeight, heightIn, points, range, today, units = "imperial" } = opts;
   if (goalWeight >= startWeight) return [];
   const marks = new Map<number, { label: string; detail: string }>();
 
-  const firstStep = Math.floor((startWeight - 0.01) / 5) * 5;
-  for (let w = firstStep; w > goalWeight; w -= 5) {
-    marks.set(w, { label: `${w} lb`, detail: `${round(startWeight - w, 1)} lb down` });
+  const step = units === "metric" ? 2 : 5;
+  const startU = toWeight(startWeight, units);
+  const goalU = toWeight(goalWeight, units);
+  for (let wu = Math.floor((startU - 0.01) / step) * step; wu > goalU + 1e-9; wu -= step) {
+    marks.set(round(fromWeight(wu, units), 3), { label: `${wu} ${weightUnit(units)}`, detail: `${formatWeight(startWeight - fromWeight(wu, units), units)} down` });
   }
   for (const [bmi, name] of [
     [30, "Out of the obese range"],
@@ -190,10 +195,10 @@ export function buildMilestones(opts: {
   ] as const) {
     const w = Math.floor(weightForBmi(bmi, heightIn) * 10) / 10;
     if (w < startWeight && w > goalWeight) {
-      marks.set(w, { label: name, detail: `BMI under ${bmi} at ${w} lb` });
+      marks.set(w, { label: name, detail: `BMI under ${bmi} at ${formatWeight(w, units)}` });
     }
   }
-  marks.set(goalWeight, { label: "Goal weight", detail: `${goalWeight} lb` });
+  marks.set(goalWeight, { label: "Goal weight", detail: formatWeight(goalWeight, units) });
 
   const current = points.length ? points[points.length - 1].trend : startWeight;
   return [...marks.entries()]

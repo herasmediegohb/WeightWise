@@ -69,6 +69,7 @@ export default async function SettingsPage() {
           calorieTarget: p.calorieTarget,
           proteinTargetG: p.proteinTargetG,
           waterTargetOz: p.waterTargetOz,
+          units: p.units,
         }}
         backups={
           <BackupSettings

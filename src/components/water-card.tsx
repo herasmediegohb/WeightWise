@@ -4,16 +4,17 @@ import { useOptimistic, useState, useTransition } from "react";
 import { ArrowCounterClockwise, Check, Drop } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { addWater, undoWater } from "@/app/actions";
-import { cn, int } from "@/lib/utils";
+import { formatWater, fromWater, toWater, waterQuickAdds, waterUnit, type Units } from "@/lib/units";
+import { cn } from "@/lib/utils";
 import { Card, Eyebrow, IconButton } from "./ui";
 
-const QUICK = [8, 12, 16, 24];
 
 export function WaterCard({
   date,
   total,
   target,
   lastOz,
+  units,
   className,
 }: {
   date: string;
@@ -21,6 +22,7 @@ export function WaterCard({
   target: number;
   /** Size of the most recent entry, so undo can update optimistically. */
   lastOz: number | null;
+  units: Units;
   className?: string;
 }) {
   const [optimistic, bump] = useOptimistic(total, (cur: number, delta: number) => Math.max(0, cur + delta));
@@ -70,8 +72,8 @@ export function WaterCard({
           </IconButton>
         </div>
         <p className="mt-1 flex items-baseline gap-2" aria-live="polite">
-          <span className="display text-5xl font-semibold">{int(optimistic)}</span>
-          <span className="text-base text-muted">of {target} oz</span>
+          <span className="display text-5xl font-semibold">{toWater(optimistic, units).toLocaleString("en-US")}</span>
+          <span className="text-base text-muted">of {formatWater(target, units)}</span>
         </p>
         <p className="mt-1.5 flex items-center gap-1.5 text-sm text-muted">
           {done ? (
@@ -80,19 +82,19 @@ export function WaterCard({
               Target reached
             </>
           ) : (
-            `${int(target - optimistic)} oz to go`
+            `${formatWater(target - optimistic, units)} to go`
           )}
         </p>
         <div className="mt-4 grid grid-cols-4 gap-2">
-          {QUICK.map((oz) => (
+          {waterQuickAdds(units).map((amount) => (
             <button
-              key={oz}
+              key={amount}
               type="button"
-              onClick={() => add(oz)}
-              aria-label={`Add ${oz} ounces of water`}
+              onClick={() => add(fromWater(amount, units))}
+              aria-label={`Add ${amount} ${units === "metric" ? "millilitres" : "ounces"} of water`}
               className="h-12 rounded-2xl border border-border bg-surface text-[15px] font-semibold tnum transition-[transform,border-color] duration-150 hover:border-water active:scale-95"
             >
-              +{oz}
+              +{amount}
             </button>
           ))}
         </div>
@@ -101,19 +103,20 @@ export function WaterCard({
           onSubmit={(e) => {
             e.preventDefault();
             const n = Number(custom);
-            if (!(n >= 1 && n <= 200)) return toast.error("Enter an amount between 1 and 200 oz.");
-            add(n);
+            const [min, max] = units === "metric" ? [30, 6000] : [1, 200];
+            if (!(n >= min && n <= max)) return toast.error(`Enter an amount between ${min} and ${max} ${waterUnit(units)}.`);
+            add(fromWater(n, units));
             setCustom("");
           }}
         >
           <label htmlFor="water-custom" className="sr-only">
-            Custom amount in ounces
+            Custom amount in {units === "metric" ? "millilitres" : "ounces"}
           </label>
           <input
             id="water-custom"
             type="number"
             inputMode="decimal"
-            placeholder="Other amount (oz)"
+            placeholder={`Other amount (${waterUnit(units)})`}
             value={custom}
             onChange={(e) => setCustom(e.target.value)}
             className="h-11 min-w-0 flex-1 rounded-2xl border border-border bg-surface px-4 text-base placeholder:text-muted/70 focus:border-water focus:outline-none focus-visible:outline-none"
