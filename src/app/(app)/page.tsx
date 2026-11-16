@@ -31,6 +31,7 @@ export default async function TodayPage() {
   const totals = o.totals.get(today) ?? { calories: 0, proteinG: 0, carbsG: 0, fatG: 0 };
   const water = waterRows.reduce((a, r) => a + r.oz, 0);
   const todayLog = o.weights.find((w) => w.date === today) ?? null;
+  const previous = o.weights.filter((w) => w.date < today).at(-1) ?? null;
   const recent = o.points.filter((pt) => pt.date >= addDays(today, -60));
   const next = o.milestones.find((m) => !m.achievedOn) ?? null;
   const reached = o.milestones.filter((m) => m.achievedOn).length;
@@ -57,6 +58,7 @@ export default async function TodayPage() {
           today={today}
           latest={o.latest}
           todayLog={todayLog && { id: todayLog.id, weightLb: todayLog.weightLb, note: todayLog.note }}
+          previous={previous && { date: previous.date, weightLb: previous.weightLb }}
           recent={recent.length >= 2 ? recent : o.points.slice(-12)}
           rate={o.rate}
           lost={o.lost}
