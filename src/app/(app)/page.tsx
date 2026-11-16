@@ -10,7 +10,7 @@ import { getDb, schema } from "@/db";
 import { aiConfigured } from "@/lib/ai";
 import { lastCompletedWeekStart } from "@/lib/coach";
 import { getCheckins, getOverview, getProfile, getRecentFoods, getSavedMeals } from "@/lib/data";
-import { addDays, formatFull, formatLong } from "@/lib/dates";
+import { addDays, formatFull, formatLong, formatRange } from "@/lib/dates";
 import { mealForHour } from "@/lib/meals";
 import { getClock } from "@/lib/session";
 import { num } from "@/lib/utils";
@@ -97,10 +97,12 @@ export default async function TodayPage() {
                 <span className="font-semibold text-fg">{num(Math.max(0, o.currentTrend - next.weight))} lb</span> to go
                 {next.projectedOn ? `, on track for ${formatFull(next.projectedOn)}` : ""}
               </p>
-              {o.goalDate && next.key !== String(p.goalWeightLb) && (
+              {o.goal.date && (
                 <p className="mt-3 border-t border-border pt-3 text-sm text-muted">
                   Goal weight of {num(p.goalWeightLb)} lb projected for{" "}
-                  <span className="font-medium text-fg">{formatFull(o.goalDate)}</span>
+                  <span className="font-medium text-fg">{formatFull(o.goal.date)}</span>
+                  {o.goal.early && <>, likely {formatRange(o.goal.early, o.goal.late)}</>}
+                  {o.range && <> ({o.range.confidence} confidence)</>}.
                 </p>
               )}
             </Card>

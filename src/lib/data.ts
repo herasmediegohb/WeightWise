@@ -5,7 +5,7 @@ import { getDb, schema } from "@/db";
 import type { Profile } from "@/db/schema";
 import {
   ageOn,
-  bestRate,
+  bodyFatPlan,
   bmi,
   bmr,
   buildMilestones,
@@ -14,6 +14,8 @@ import {
   formulaTdee,
   isStalled,
   projectDate,
+  projectRange,
+  rateRange,
   weighInStreak,
 } from "./calc";
 import { addDays } from "./dates";
@@ -114,15 +116,17 @@ export async function getChat(limit = 60) {
 
 /** Everything derived from the logs that more than one screen needs. */
 export async function getOverview(p: Profile, today: string) {
-  const [weights, totals] = await Promise.all([
+  const [weights, totals, scans] = await Promise.all([
     getWeights(),
     getDailyTotals(addDays(today, -60), today),
+    getScans(),
   ]);
   const points = computeTrend(weights.map((w) => ({ date: w.date, weight: w.weightLb })));
   const latest = points.at(-1) ?? null;
   const currentTrend = latest?.trend ?? p.startWeightLb;
   const currentWeight = latest?.weight ?? p.startWeightLb;
-  const rate = bestRate(points, today);
+  const range = rateRange(points, today);
+  const rate = range?.rate ?? null;
   const age = ageOn(p.birthdate, today);
   const restingKcal = bmr({ weightLb: currentTrend, heightIn: p.heightIn, age, sex: p.sex });
   const formula = formulaTdee(restingKcal, p.activityLevel);
@@ -133,9 +137,11 @@ export async function getOverview(p: Profile, today: string) {
     goalWeight: p.goalWeightLb,
     heightIn: p.heightIn,
     points,
-    rate,
+    range,
     today,
   });
+  const lastFatScan = [...scans].reverse().find((sc) => sc.bodyFatPct !== null) ?? null;
+  const bodyFat = bodyFatPlan({ scan: lastFatScan, points, currentTrend, range, today });
   const totalToLose = p.startWeightLb - p.goalWeightLb;
   const lost = p.startWeightLb - currentTrend;
   return {
@@ -153,7 +159,10 @@ export async function getOverview(p: Profile, today: string) {
     lost,
     remaining: Math.max(0, currentTrend - p.goalWeightLb),
     progress: totalToLose > 0 ? Math.min(1, Math.max(0, lost / totalToLose)) : 0,
+    range,
+    goal: projectRange(currentTrend, p.goalWeightLb, range, today),
     goalDate: projectDate(currentTrend, p.goalWeightLb, rate, today),
+    bodyFat,
     bmi: bmi(currentTrend, p.heightIn),
     stalled: isStalled(points, today),
     streak: weighInStreak(weights.map((w) => w.date), today),

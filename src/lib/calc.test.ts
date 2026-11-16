@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  bodyFatPlan,
+  rateRange,
   bmi,
   bmr,
   buildMilestones,
@@ -110,13 +112,15 @@ describe("buildMilestones", () => {
       goalWeight: 180,
       heightIn: 60,
       points,
-      rate: -1,
+      range: { rate: -1, fast: -1.2, slow: -0.8, confidence: "high", weighIns: 50 },
       today: "2026-02-19",
     });
     expect(ms.map((m) => m.weight)).toEqual([195, 190, 185, 180]);
     expect(ms[0].achievedOn).not.toBeNull();
     expect(ms[1].achievedOn).toBeNull();
     expect(ms[1].projectedOn).not.toBeNull();
+    expect(ms[1].early! < ms[1].projectedOn!).toBe(true);
+    expect(ms[1].late! > ms[1].projectedOn!).toBe(true);
     expect(ms[3].label).toBe("Goal weight");
   });
 });
@@ -126,5 +130,80 @@ describe("weighInStreak", () => {
     expect(weighInStreak(["2026-01-03", "2026-01-02", "2026-01-01"], "2026-01-03")).toBe(3);
     expect(weighInStreak(["2026-01-02", "2026-01-01"], "2026-01-03")).toBe(2);
     expect(weighInStreak(["2026-01-01"], "2026-01-03")).toBe(0);
+  });
+});
+
+describe("rateRange", () => {
+  it("is narrow and confident for steady daily weigh-ins", () => {
+    const pts = computeTrend(daily("2026-01-01", 40, (i) => 200 - i / 7 + (i % 2 ? 0.3 : -0.3)));
+    const r = rateRange(pts, "2026-02-09")!;
+    expect(r.rate).toBeCloseTo(-1, 0);
+    expect(r.confidence).toBe("high");
+    expect(r.slow - r.fast).toBeLessThan(0.6);
+    expect(r.fast).toBeLessThan(r.rate);
+    expect(r.slow).toBeGreaterThan(r.rate);
+  });
+
+  it("is wide and low-confidence for a few noisy weigh-ins", () => {
+    const pts = computeTrend([
+      { date: "2026-01-01", weight: 200 },
+      { date: "2026-01-09", weight: 201.5 },
+      { date: "2026-01-20", weight: 198 },
+      { date: "2026-01-27", weight: 199.6 },
+    ]);
+    const r = rateRange(pts, "2026-01-28")!;
+    expect(r.confidence).toBe("low");
+    expect(r.slow - r.fast).toBeGreaterThan(1);
+  });
+
+  it("returns null without enough data", () => {
+    expect(rateRange(computeTrend([{ date: "2026-01-01", weight: 200 }]), "2026-01-02")).toBeNull();
+  });
+});
+
+describe("bodyFatPlan", () => {
+  const points = computeTrend(daily("2026-09-01", 60, (i) => 182 - i / 10));
+  const range = { rate: -0.7, fast: -0.9, slow: -0.5, confidence: "medium" as const, weighIns: 60 };
+
+  it("uses measured lean mass and finds the weight for each target", () => {
+    const plan = bodyFatPlan({
+      scan: { date: "2026-09-07", bodyFatPct: 30, leanMassLb: 128.08 },
+      points,
+      currentTrend: 176.6,
+      range,
+      today: "2026-10-30",
+    })!;
+    expect(plan.leanSource).toBe("measured");
+    expect(plan.estimatedPct).toBeCloseTo(27.5, 0);
+    expect(plan.milestones.map((m) => m.pct)).toEqual([25, 20, 18, 15]);
+    expect(plan.milestones[1].weight).toBeCloseTo(160.1, 1); // 128.08 / 0.8
+    expect(plan.milestones[1].date).not.toBeNull();
+  });
+
+  it("derives lean mass from body fat and the trend when lean mass wasn't measured", () => {
+    const plan = bodyFatPlan({
+      scan: { date: "2026-10-03", bodyFatPct: 27.7, leanMassLb: null },
+      points,
+      currentTrend: 176.6,
+      range,
+      today: "2026-10-30",
+    })!;
+    expect(plan.leanSource).toBe("derived");
+    expect(plan.milestones[0].pct).toBe(25);
+  });
+
+  it("marks targets already passed as reached", () => {
+    const plan = bodyFatPlan({
+      scan: { date: "2026-09-07", bodyFatPct: 30, leanMassLb: 128.08 },
+      points,
+      currentTrend: 170,
+      range,
+      today: "2026-10-30",
+    })!;
+    expect(plan.milestones[0].reached).toBe(true); // 25% is at 170.8 lb
+  });
+
+  it("needs a scan with body fat", () => {
+    expect(bodyFatPlan({ scan: null, points, currentTrend: 176, range, today: "2026-10-30" })).toBeNull();
   });
 });

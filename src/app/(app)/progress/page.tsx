@@ -6,7 +6,7 @@ import { Card, Eyebrow } from "@/components/ui";
 import { WeightChart } from "@/components/weight-chart";
 import { MIN_COMPLETE_DAY_KCAL, bmiCategory } from "@/lib/calc";
 import { getOverview, getProfile, getScans } from "@/lib/data";
-import { addDays, diffDays, formatFull } from "@/lib/dates";
+import { addDays, diffDays, formatFull, formatRange } from "@/lib/dates";
 import { getClock } from "@/lib/session";
 import { cn, int, num, signed } from "@/lib/utils";
 
@@ -34,9 +34,19 @@ export default async function ProgressPage() {
 
   const tiles = [
     { label: "Lost so far", value: `${num(Math.max(0, o.lost))} lb`, sub: `since ${formatFull(p.startDate)}` },
-    { label: "Weekly rate", value: o.rate === null ? "–" : `${signed(o.rate)} lb`, sub: o.rate === null ? "needs more weigh-ins" : `target ${signed(-p.paceLbPerWeek)} lb` },
+    {
+      label: "Weekly rate",
+      value: o.range === null ? "–" : `${signed(o.range.rate)} lb`,
+      sub: o.range === null ? "needs more weigh-ins" : `likely ${signed(o.range.fast)} to ${signed(o.range.slow)}, target ${signed(-p.paceLbPerWeek)}`,
+    },
     { label: "BMI", value: num(o.bmi), sub: bmiCategory(o.bmi) },
-    { label: "Goal date", value: o.goalDate ? formatFull(o.goalDate).replace(/, \d{4}$/, "") : "–", sub: o.goalDate ? `${o.goalDate.slice(0, 4)}, at the current rate` : "no projection at this rate" },
+    {
+      label: "Goal date",
+      value: o.goal.date ? formatFull(o.goal.date) : "–",
+      sub: o.goal.date
+        ? `likely ${formatRange(o.goal.early, o.goal.late)}`
+        : "no projection at the current rate",
+    },
   ];
 
   return (
@@ -65,6 +75,15 @@ export default async function ProgressPage() {
             </div>
           ))}
         </dl>
+        {o.range && (
+          <p className="-mt-1 text-sm text-muted lg:col-span-2">
+            <span className={cn("font-semibold", o.range.confidence === "high" ? "text-accent" : o.range.confidence === "low" ? "text-warn" : "text-fg")}>
+              {o.range.confidence[0].toUpperCase() + o.range.confidence.slice(1)} confidence
+            </span>{" "}
+            in these projections, from {o.range.weighIns} weigh-ins in recent weeks.
+            {o.range.confidence !== "high" && " Weighing in most mornings narrows the range."}
+          </p>
+        )}
 
         <Card>
           <Eyebrow className="flex items-center gap-1.5">
@@ -148,7 +167,7 @@ export default async function ProgressPage() {
         </Card>
 
         <div className="grid gap-4">
-          <BodyComposition scans={scans} today={today} />
+          <BodyComposition scans={scans} today={today} plan={o.bodyFat} />
           <WeighInHistory rows={history} today={today} />
         </div>
       </div>

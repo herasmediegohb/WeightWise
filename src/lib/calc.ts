@@ -64,9 +64,79 @@ export function weeklyRate(
   return round((num / den) * 7, 2);
 }
 
-/** Longer window first, falling back so sparse loggers still get a rate. */
+/** Recent window first, falling back to a longer one so sparse loggers still get a rate. */
 export function bestRate(points: TrendPoint[], today: string): number | null {
-  return weeklyRate(points, today, 28) ?? weeklyRate(points, today, 60) ?? null;
+  return bestRateWindow(points, today)?.rate ?? null;
+}
+
+export function bestRateWindow(points: TrendPoint[], today: string): { rate: number; windowDays: number } | null {
+  for (const windowDays of [28, 60]) {
+    const rate = weeklyRate(points, today, windowDays);
+    if (rate !== null) return { rate, windowDays };
+  }
+  return null;
+}
+
+export type RateRange = {
+  /** Most likely rate, lb/week (negative = losing). */
+  rate: number;
+  /** Faster and slower plausible rates (about an 80% range). */
+  fast: number;
+  slow: number;
+  confidence: "low" | "medium" | "high";
+  weighIns: number;
+};
+
+/**
+ * How sure the weekly rate is. Fits a straight line through the raw scale
+ * weights over the same window as the rate, by calendar day, and uses the
+ * scatter around that line to put a range on the rate. Few or noisy
+ * weigh-ins give a wide range and low confidence.
+ */
+export function rateRange(points: TrendPoint[], today: string): RateRange | null {
+  const best = bestRateWindow(points, today);
+  if (!best) return null;
+  const from = addDays(today, -best.windowDays);
+  const win = points.filter((p) => p.date >= from && p.date <= today);
+  const n = win.length;
+  const xs = win.map((p) => diffDays(p.date, win[0].date));
+  const ys = win.map((p) => p.weight);
+  const mx = avg(xs);
+  const my = avg(ys);
+  let sxx = 0;
+  let sxy = 0;
+  for (let i = 0; i < n; i++) {
+    sxx += (xs[i] - mx) ** 2;
+    sxy += (xs[i] - mx) * (ys[i] - my);
+  }
+  const b = sxy / sxx;
+  let sse = 0;
+  for (let i = 0; i < n; i++) sse += (ys[i] - (my + b * (xs[i] - mx))) ** 2;
+  // Standard error of the slope, in lb/week. Floored so a handful of
+  // unusually tidy weigh-ins never claims more precision than a scale has.
+  const se = Math.max(0.1, n > 2 ? Math.sqrt(sse / (n - 2) / sxx) * 7 : Infinity);
+  const spread = 1.28 * se;
+  const rel = se / Math.max(0.05, Math.abs(best.rate));
+  const confidence = n < 6 || rel > 0.5 ? "low" : rel > 0.25 ? "medium" : "high";
+  return {
+    rate: best.rate,
+    fast: round(best.rate - spread, 2),
+    slow: round(best.rate + spread, 2),
+    confidence,
+    weighIns: n,
+  };
+}
+
+export type DateRange = { date: string | null; early: string | null; late: string | null };
+
+/** Projected date plus the earliest and latest plausible dates. `late` is null when the slow end isn't a loss. */
+export function projectRange(current: number, target: number, range: RateRange | null, today: string): DateRange {
+  if (!range) return { date: null, early: null, late: null };
+  return {
+    date: projectDate(current, target, range.rate, today),
+    early: projectDate(current, target, range.fast, today),
+    late: projectDate(current, target, range.slow, today),
+  };
 }
 
 export function projectDate(
@@ -89,6 +159,8 @@ export type Milestone = {
   detail: string;
   achievedOn: string | null;
   projectedOn: string | null;
+  early: string | null;
+  late: string | null;
 };
 
 /**
@@ -101,10 +173,10 @@ export function buildMilestones(opts: {
   goalWeight: number;
   heightIn: number;
   points: TrendPoint[];
-  rate: number | null;
+  range: RateRange | null;
   today: string;
 }): Milestone[] {
-  const { startWeight, goalWeight, heightIn, points, rate, today } = opts;
+  const { startWeight, goalWeight, heightIn, points, range, today } = opts;
   if (goalWeight >= startWeight) return [];
   const marks = new Map<number, { label: string; detail: string }>();
 
@@ -128,12 +200,15 @@ export function buildMilestones(opts: {
     .sort((a, b) => b[0] - a[0])
     .map(([weight, m]) => {
       const hit = points.find((p) => p.trend <= weight);
+      const proj = hit ? null : projectRange(current, weight, range, today);
       return {
         key: String(weight),
         weight,
         ...m,
         achievedOn: hit?.date ?? null,
-        projectedOn: hit ? null : projectDate(current, weight, rate, today),
+        projectedOn: proj?.date ?? null,
+        early: proj?.early ?? null,
+        late: proj?.late ?? null,
       };
     });
 }
@@ -254,6 +329,58 @@ export function suggestCalorieTarget(
 export function suggestProteinTarget(goalWeightLb: number): number {
   // ~0.8 g per lb of goal weight: enough to protect muscle in a deficit.
   return Math.round((goalWeightLb * 0.8) / 5) * 5;
+}
+
+export type BodyFatPlan = {
+  /** Lean mass the projections assume stays constant. */
+  leanMassLb: number;
+  leanSource: "measured" | "derived";
+  scanDate: string;
+  scanPct: number;
+  /** Body fat now, estimated from today's trend weight and that lean mass. */
+  estimatedPct: number;
+  milestones: (DateRange & { pct: number; weight: number; reached: boolean })[];
+};
+
+/**
+ * Body-fat milestones with dates. Assumes lean mass stays at its last
+ * measured value (a reasonable assumption with enough protein and some
+ * strength training), so the weight at which body fat reaches X% is
+ * lean / (1 - X/100). The date for that weight comes from the weight trend.
+ */
+export function bodyFatPlan(opts: {
+  scan: { date: string; bodyFatPct: number | null; leanMassLb: number | null } | null;
+  points: TrendPoint[];
+  currentTrend: number;
+  range: RateRange | null;
+  today: string;
+  targets?: number[];
+}): BodyFatPlan | null {
+  const { scan, points, currentTrend, range, today, targets = [25, 20, 18, 15] } = opts;
+  if (!scan || scan.bodyFatPct === null) return null;
+  const weightAtScan = trendAt(points, scan.date);
+  const leanMassLb =
+    scan.leanMassLb ?? (weightAtScan === null ? null : weightAtScan * (1 - scan.bodyFatPct / 100));
+  if (leanMassLb === null || leanMassLb <= 0 || leanMassLb >= currentTrend) return null;
+  return {
+    leanMassLb: round(leanMassLb, 1),
+    leanSource: scan.leanMassLb !== null ? "measured" : "derived",
+    scanDate: scan.date,
+    scanPct: scan.bodyFatPct,
+    estimatedPct: round(((currentTrend - leanMassLb) / currentTrend) * 100, 1),
+    milestones: targets
+      .filter((pct) => pct < scan.bodyFatPct!)
+      .map((pct) => {
+        const weight = round(leanMassLb / (1 - pct / 100), 1);
+        const reached = currentTrend <= weight;
+        return {
+          pct,
+          weight,
+          reached,
+          ...(reached ? { date: null, early: null, late: null } : projectRange(currentTrend, weight, range, today)),
+        };
+      }),
+  };
 }
 
 /** True when the trend has been essentially flat for two weeks or more. */

@@ -76,3 +76,13 @@ export function relativeDay(date: string, today: string): string {
   if (d === 1) return "Tomorrow";
   return formatLong(date);
 }
+
+/** "Dec 28 to Apr 10, 2027", "Dec 28, 2026 to Apr 10, 2027", or "Dec 28, 2026 or later". */
+export function formatRange(early: string | null, late: string | null): string | null {
+  if (!early) return null;
+  if (!late) return `${formatFull(early)} or later`;
+  if (early === late) return formatFull(early);
+  return early.slice(0, 4) === late.slice(0, 4)
+    ? `${formatShort(early)} to ${formatFull(late)}`
+    : `${formatFull(early)} to ${formatFull(late)}`;
+}

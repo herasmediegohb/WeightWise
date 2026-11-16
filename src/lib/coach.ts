@@ -53,7 +53,26 @@ export async function buildCoachContext(p: Profile, today: string): Promise<stri
   out += line("Lost so far (trend)", `${round(o.lost)} lb`);
   out += line("Left to goal", `${round(o.remaining)} lb`);
   out += line("Rate, recent weeks", o.rate === null ? "not enough data" : `${o.rate} lb/week`);
-  out += line("Projected goal date", o.goalDate ?? "cannot project at the current rate");
+  out += line(
+    "Projected goal date",
+    o.goal.date
+      ? `${o.goal.date} (likely ${o.goal.early ?? "?"} to ${o.goal.late ?? "later"}, ${o.range?.confidence} confidence from ${o.range?.weighIns} weigh-ins)`
+      : "cannot project at the current rate",
+  );
+  if (o.range) out += line("Plausible rate range", `${o.range.fast} to ${o.range.slow} lb/week`);
+  if (o.bodyFat) {
+    const bf = o.bodyFat;
+    out += line(
+      "Body fat",
+      `about ${bf.estimatedPct}% now (estimated: assumes lean mass of ${bf.leanMassLb} lb from the ${bf.scanDate} scan, which measured ${bf.scanPct}%)`,
+    );
+    out += line(
+      "Body-fat milestones",
+      bf.milestones
+        .map((m) => `${m.pct}% at ${m.weight} lb: ${m.reached ? "reached" : m.date ? `projected ${m.date}` : "no date at current rate"}`)
+        .join("; "),
+    );
+  }
   out += line("BMI", o.bmi);
   out += line("Resting energy (formula)", `${o.restingKcal} kcal`);
   out += line(

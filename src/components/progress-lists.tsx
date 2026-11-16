@@ -5,7 +5,8 @@ import { Plus, Scales } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { deleteScan, saveScan } from "@/app/actions";
 import type { BodyScan } from "@/db/schema";
-import { formatFull } from "@/lib/dates";
+import type { BodyFatPlan } from "@/lib/calc";
+import { formatFull, formatRange } from "@/lib/dates";
 import { num, signed } from "@/lib/utils";
 import { Button, Card, Empty, Field, Sheet } from "./ui";
 import { WeightSheet, type WeightSheetState } from "./weight-sheet";
@@ -82,7 +83,7 @@ const SCAN_FIELDS = [
 
 type ScanKey = (typeof SCAN_FIELDS)[number]["key"];
 
-export function BodyComposition({ scans, today }: { scans: BodyScan[]; today: string }) {
+export function BodyComposition({ scans, today, plan }: { scans: BodyScan[]; today: string; plan: BodyFatPlan | null }) {
   const [editing, setEditing] = useState<BodyScan | "new" | null>(null);
   const newestFirst = [...scans].reverse();
 
@@ -129,6 +130,34 @@ export function BodyComposition({ scans, today }: { scans: BodyScan[]; today: st
               );
             })}
           </dl>
+          {plan && plan.milestones.length > 0 && (
+            <div className="mt-5 border-t border-border pt-4">
+              <h3 className="font-semibold">Body-fat milestones</h3>
+              <p className="mt-1 text-sm leading-relaxed text-muted">
+                About <span className="font-semibold text-fg tnum">{num(plan.estimatedPct)}%</span> now, estimated from your trend weight
+                and {num(plan.leanMassLb)} lb of lean mass ({plan.leanSource === "measured" ? "measured in" : "worked out from"} your{" "}
+                {formatFull(plan.scanDate)} scan). Dates assume you keep that lean mass, which enough protein and strength training help with.
+              </p>
+              <ul className="mt-3 space-y-2">
+                {plan.milestones.map((m) => (
+                  <li key={m.pct} className="flex items-center gap-3 rounded-2xl bg-surface-2 px-3.5 py-2.5">
+                    <span className="w-12 shrink-0 text-lg font-semibold tnum">{m.pct}%</span>
+                    <span className="min-w-0 flex-1 text-sm tnum">
+                      <span className="block font-medium">at {num(m.weight)} lb</span>
+                      <span className="block text-muted">
+                        {m.reached
+                          ? "Reached, by this estimate"
+                          : m.date
+                            ? `Projected ${formatFull(m.date)}${m.early ? `, likely ${formatRange(m.early, m.late)}` : ""}`
+                            : "No date at the current rate"}
+                      </span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-xs text-muted">A new scan updates these.</p>
+            </div>
+          )}
           <h3 className="mb-1 mt-5 text-sm font-medium text-muted">Scans</h3>
           <ul className="-mx-2">
             {newestFirst.map((s) => (
