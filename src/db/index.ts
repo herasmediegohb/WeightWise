@@ -1,6 +1,7 @@
 import "server-only";
 import path from "node:path";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
+import { checkConnectionString, sslFor } from "@/lib/db-errors";
 import * as schema from "./schema";
 
 export type DB = PgDatabase<PgQueryResultHKT, typeof schema>;
@@ -12,13 +13,21 @@ async function connect(): Promise<DB> {
   if (url) {
     // Hosted Postgres (Supabase / Neon). `prepare: false` keeps this
     // compatible with transaction-mode connection poolers.
+    const problem = checkConnectionString(url);
+    if (problem) throw Object.assign(new Error(problem.title), { dbProblem: problem });
     const { default: postgres } = await import("postgres");
     const { drizzle } = await import("drizzle-orm/postgres-js");
-    const client = postgres(url, { prepare: false, max: 1 });
+    const client = postgres(url, {
+      prepare: false,
+      max: 1,
+      ssl: sslFor(url),
+      connect_timeout: 10,
+    });
     return drizzle(client, { schema }) as unknown as DB;
   }
   if (process.env.VERCEL) {
-    throw new Error("DATABASE_URL is not set. Add it in the Vercel project settings.");
+    const problem = checkConnectionString(undefined)!;
+    throw Object.assign(new Error(problem.title), { dbProblem: problem });
   }
   // Local development: embedded Postgres stored in ./.data, no setup needed.
   const { PGlite } = await import("@electric-sql/pglite");

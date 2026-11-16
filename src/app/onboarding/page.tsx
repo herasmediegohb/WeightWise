@@ -1,4 +1,6 @@
 import { redirect } from "next/navigation";
+import { SetupProblem } from "@/components/setup-problem";
+import { problemFrom } from "@/lib/db-health";
 import { getProfile, getWeights } from "@/lib/data";
 import { getClock } from "@/lib/session";
 import { Onboarding } from "./onboarding";
@@ -7,7 +9,14 @@ export const metadata = { title: "Welcome" };
 export const dynamic = "force-dynamic";
 
 export default async function OnboardingPage() {
-  const [profile, weights, clock] = await Promise.all([getProfile(), getWeights(), getClock()]);
+  let profile, weights;
+  try {
+    [profile, weights] = await Promise.all([getProfile(), getWeights()]);
+  } catch (err) {
+    console.error("[onboarding]", err);
+    return <SetupProblem problem={problemFrom(err)} />;
+  }
+  const clock = await getClock();
   if (profile) redirect("/");
   return (
     <Onboarding

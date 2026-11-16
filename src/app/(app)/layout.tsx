@@ -1,13 +1,22 @@
 import { redirect } from "next/navigation";
 import { BottomNav, Sidebar } from "@/components/nav";
+import { SetupProblem } from "@/components/setup-problem";
 import { TzSync } from "@/components/tz-sync";
+import { problemFrom } from "@/lib/db-health";
 import { getProfile } from "@/lib/data";
 import { getClock } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const [profile, clock] = await Promise.all([getProfile(), getClock()]);
+  let profile: Awaited<ReturnType<typeof getProfile>>;
+  try {
+    profile = await getProfile();
+  } catch (err) {
+    console.error("[layout]", err);
+    return <SetupProblem problem={problemFrom(err)} />;
+  }
+  const clock = await getClock();
   if (!profile) redirect("/onboarding");
   return (
     <>
