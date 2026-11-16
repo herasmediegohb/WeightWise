@@ -19,6 +19,7 @@ export function SettingsForm({
   expenditure,
   aiEnabled,
   authEnabled,
+  backups,
 }: {
   initial: ProfileInput;
   today: string;
@@ -26,6 +27,8 @@ export function SettingsForm({
   expenditure: number;
   aiEnabled: boolean;
   authEnabled: boolean;
+  /** The backups card, rendered between the form and "Your data". */
+  backups?: React.ReactNode;
 }) {
   const router = useRouter();
   const [f, setF] = useState({
@@ -172,6 +175,8 @@ export function SettingsForm({
         </div>
       </form>
 
+      {backups && <div className="mt-4">{backups}</div>}
+
       <Card className="mt-4">
         <h2 className="font-semibold">Your data</h2>
         <div className="mt-3 divide-y divide-border">
@@ -185,7 +190,7 @@ export function SettingsForm({
           <div className="flex flex-wrap items-center justify-between gap-3 py-4">
             <p className="min-w-0 flex-1 text-sm">
               <span className="block font-medium">Export everything</span>
-              <span className="text-muted">One JSON file with all your logs and settings.</span>
+              <span className="text-muted">One JSON file with all your logs and settings. It can be restored under Backups.</span>
             </p>
             <a
               href="/api/export"
@@ -199,7 +204,7 @@ export function SettingsForm({
           <div className="flex flex-wrap items-center justify-between gap-3 pt-4">
             <p className="min-w-0 flex-1 text-sm">
               <span className="block font-medium">Delete all data</span>
-              <span className="text-muted">Removes every log, your profile and the coach history. This can&apos;t be undone.</span>
+              <span className="text-muted">Removes every log, your profile, the coach history and the backups kept in the database. Off-site copies in Vercel Blob are kept.</span>
             </p>
             <Button type="button" variant="danger" onClick={() => setDeleteOpen(true)}>
               Delete

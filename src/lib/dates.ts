@@ -86,3 +86,38 @@ export function formatRange(early: string | null, late: string | null): string |
     ? `${formatShort(early)} to ${formatFull(late)}`
     : `${formatFull(early)} to ${formatFull(late)}`;
 }
+
+/** Local date, minutes since midnight and weekday (0 = Sunday) in a time zone. */
+export function localClock(tz: string, now = new Date()): { date: string; minutes: number; weekday: number } {
+  let parts: Record<string, string>;
+  try {
+    parts = Object.fromEntries(
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: tz,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        weekday: "short",
+        hourCycle: "h23",
+      })
+        .formatToParts(now)
+        .map((p) => [p.type, p.value]),
+    );
+  } catch {
+    return localClock("UTC", now);
+  }
+  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  return {
+    date: `${parts.year}-${parts.month}-${parts.day}`,
+    minutes: Number(parts.hour) * 60 + Number(parts.minute),
+    weekday: days.indexOf(parts.weekday),
+  };
+}
+
+/** "07:30" -> 450, or null when not a valid time. */
+export function parseTime(hhmm: string | null | undefined): number | null {
+  const m = hhmm?.match(/^([01]\d|2[0-3]):([0-5]\d)$/);
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}

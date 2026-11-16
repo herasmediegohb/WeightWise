@@ -160,7 +160,11 @@ export async function buildCheckinStats(p: Profile, today: string, start: string
 }
 
 /** Plain summary used when AI is not configured, so the check-in still works. */
-export function fallbackCheckinSummary(s: CheckinStats, suggested: number): { headline: string; summary: string } {
+export function fallbackCheckinSummary(
+  s: CheckinStats,
+  suggested: number,
+  _p?: Pick<Profile, "phase">,
+): { headline: string; summary: string } {
   const parts: string[] = [];
   if (s.trendChange !== null) {
     parts.push(

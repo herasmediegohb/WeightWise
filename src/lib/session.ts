@@ -12,9 +12,9 @@ export async function assertAuthed(): Promise<void> {
   }
 }
 
-export async function getClock(): Promise<{ tz: string; today: string; hour: number }> {
+export async function getClock(): Promise<{ tz: string; today: string; hour: number; nowMs: number }> {
   const jar = await cookies();
   const raw = jar.get(TZ_COOKIE)?.value;
   const tz = raw ? decodeURIComponent(raw) : "UTC";
-  return { tz, today: todayInTz(tz), hour: hourInTz(tz) };
+  return { tz, today: todayInTz(tz), hour: hourInTz(tz), nowMs: Date.now() };
 }

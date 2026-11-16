@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { desc, eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
@@ -14,7 +14,10 @@ import {
   sessionCookieOptions,
 } from "@/lib/auth";
 import { parseCsv } from "@/lib/csv";
-import { isValidDate } from "@/lib/dates";
+import { createBackup, restoreSnapshot, validateSnapshot, getBackup } from "@/lib/backup";
+import { isValidDate, parseTime } from "@/lib/dates";
+import { sendPush } from "@/lib/push";
+import { installScheduler, schedulerSql, tickToken } from "@/lib/scheduler";
 import { assertAuthed } from "@/lib/session";
 
 type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string };
@@ -463,6 +466,132 @@ export async function importCsvFiles(files: { name: string; text: string }[]): P
   return { ok: true, summary };
 }
 
+// ── Reminders ───────────────────────────────────────────────────────────────
+
+async function requestOrigin(): Promise<string> {
+  const h = await headers();
+  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "localhost";
+  const proto = h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
+  return `${proto}://${host}`;
+}
+
+export async function savePushSubscription(input: {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+  device?: string;
+}): Promise<Result> {
+  await assertAuthed();
+  if (!/^https:\/\//.test(input.endpoint) || !input.keys?.p256dh || !input.keys?.auth) {
+    return fail("This browser returned an invalid push subscription.");
+  }
+  const db = await getDb();
+  const values = { endpoint: input.endpoint, keys: { p256dh: input.keys.p256dh, auth: input.keys.auth }, device: input.device?.slice(0, 80) ?? null };
+  await db
+    .insert(schema.pushSubscriptions)
+    .values(values)
+    .onConflictDoUpdate({ target: schema.pushSubscriptions.endpoint, set: values });
+  refresh();
+  return { ok: true };
+}
+
+export async function removePushSubscription(endpoint: string): Promise<Result> {
+  await assertAuthed();
+  const db = await getDb();
+  await db.delete(schema.pushSubscriptions).where(eq(schema.pushSubscriptions.endpoint, endpoint));
+  refresh();
+  return { ok: true };
+}
+
+export async function sendTestNotification(): Promise<Result<{ sent: number }>> {
+  await assertAuthed();
+  const { sent } = await sendPush(
+    { title: "WeightWise", body: "Notifications are working. Reminders will look like this.", url: "/settings", tag: "test" },
+    await requestOrigin(),
+  );
+  if (!sent) return fail("No device received it. Turn notifications on again on this device and retry.");
+  return { ok: true, sent };
+}
+
+export async function saveReminders(input: {
+  weighIn: string | null;
+  water: string | null;
+  checkin: boolean;
+  timezone: string;
+}): Promise<Result> {
+  await assertAuthed();
+  for (const t of [input.weighIn, input.water]) {
+    if (t !== null && parseTime(t) === null) return fail("Pick a valid time.");
+  }
+  let timezone = "UTC";
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: input.timezone });
+    timezone = input.timezone;
+  } catch {
+    // keep UTC
+  }
+  const db = await getDb();
+  await db
+    .update(schema.profile)
+    .set({ reminderWeighIn: input.weighIn, reminderWater: input.water, notifyCheckin: Boolean(input.checkin), timezone })
+    .where(eq(schema.profile.id, 1));
+  refresh();
+  return { ok: true };
+}
+
+/** Switches on the every-5-minutes scheduler in Supabase, or returns SQL to run by hand. */
+export async function setupScheduler(): Promise<Result | { ok: false; error: string; sql: string | null }> {
+  await assertAuthed();
+  const tickUrl = `${await requestOrigin()}/api/cron/tick`;
+  const res = await installScheduler(tickUrl);
+  if (res.ok) {
+    // Run once now so the status updates straight away.
+    await fetch(tickUrl, { method: "POST", headers: { Authorization: `Bearer ${tickToken()}` } }).catch(() => {});
+    refresh();
+    return { ok: true };
+  }
+  const token = tickToken();
+  return { ok: false, error: res.reason, sql: token && tickUrl.startsWith("https://") ? schedulerSql(tickUrl, token) : null };
+}
+
+// ── Backups ─────────────────────────────────────────────────────────────────
+
+export async function backupNow(): Promise<Result<{ offsite: boolean }>> {
+  await assertAuthed();
+  const { offsite } = await createBackup("manual");
+  refresh();
+  return { ok: true, offsite };
+}
+
+export async function restoreBackup(id: number): Promise<Result<{ weighIns: number; foods: number }>> {
+  await assertAuthed();
+  const data = await getBackup(id);
+  if (!data) return fail("That backup doesn't exist any more.");
+  const res = await restoreSnapshot(data);
+  refresh();
+  return { ok: true, ...res };
+}
+
+export async function restoreFromFile(text: string): Promise<Result<{ weighIns: number; foods: number }>> {
+  await assertAuthed();
+  if (text.length > 20_000_000) return fail("That file is too large to be a WeightWise backup.");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return fail("That file isn't a WeightWise backup. Choose a .json file from Export or a downloaded backup.");
+  }
+  const data = validateSnapshot(parsed);
+  if (!data) return fail("That file isn't a WeightWise backup. Choose a .json file from Export or a downloaded backup.");
+  try {
+    const res = await restoreSnapshot(data);
+    refresh();
+    return { ok: true, ...res };
+  } catch (err) {
+    console.error("[restore]", err);
+    return fail("That backup couldn't be restored, so nothing was changed. The file may be damaged.");
+  }
+}
+
 /** Permanently deletes everything, including the profile. */
 export async function deleteAllData(confirm: string): Promise<Result> {
   await assertAuthed();
@@ -476,6 +605,9 @@ export async function deleteAllData(confirm: string): Promise<Result> {
   await db.delete(schema.foodEntries);
   await db.delete(schema.weightLogs);
   await db.delete(schema.profile);
+  await db.delete(schema.backups);
+  await db.delete(schema.pushSubscriptions);
+  await db.delete(schema.reminderLog);
   refresh();
   return { ok: true };
 }
