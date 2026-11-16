@@ -18,7 +18,9 @@ import { createBackup, restoreSnapshot, validateSnapshot, getBackup } from "@/li
 import { isValidDate, parseTime } from "@/lib/dates";
 import { sendPush } from "@/lib/push";
 import { installScheduler, schedulerSql, tickToken } from "@/lib/scheduler";
-import { assertAuthed } from "@/lib/session";
+import { suggestTarget } from "@/lib/calc";
+import { getOverview, getProfile } from "@/lib/data";
+import { assertAuthed, getClock } from "@/lib/session";
 
 type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string };
 const fail = (error: string): { ok: false; error: string } => ({ ok: false, error });
@@ -117,6 +119,33 @@ export async function saveProfile(input: ProfileInput): Promise<Result> {
     .onConflictDoNothing();
   refresh();
   return { ok: true };
+}
+
+/**
+ * Switches between losing and maintaining. Moving to maintenance raises the
+ * calorie target by the first gradual step; moving back keeps the target
+ * and lets the next check-in suggest the deficit.
+ */
+export async function setPhase(phase: "lose" | "maintain"): Promise<Result<{ calorieTarget: number }>> {
+  await assertAuthed();
+  if (phase !== "lose" && phase !== "maintain") return fail("Choose a phase.");
+  const p = await getProfile();
+  if (!p) return fail("Finish setting up your profile first.");
+  const { today } = await getClock();
+  const o = await getOverview(p, today);
+  const calorieTarget = suggestTarget({
+    phase,
+    expenditure: o.expenditure.kcal,
+    paceLbPerWeek: p.paceLbPerWeek,
+    sex: p.sex,
+    goalWeightLb: p.goalWeightLb,
+    currentTrend: o.currentTrend,
+    currentTarget: p.calorieTarget,
+  });
+  const db = await getDb();
+  await db.update(schema.profile).set({ phase, calorieTarget }).where(eq(schema.profile.id, 1));
+  refresh();
+  return { ok: true, calorieTarget };
 }
 
 // ── Weight ──────────────────────────────────────────────────────────────────

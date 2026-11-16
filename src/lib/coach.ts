@@ -1,6 +1,6 @@
 import "server-only";
 import type { CheckinStats, Profile } from "@/db/schema";
-import { avg, round, suggestCalorieTarget, trendAt, MIN_COMPLETE_DAY_KCAL } from "./calc";
+import { MAINTAIN_BAND_LB, avg, maintenanceStatus, round, suggestTarget, trendAt, MIN_COMPLETE_DAY_KCAL } from "./calc";
 import { getFoodForDay, getOverview, getScans, getWaterTotals } from "./data";
 import { addDays, formatShort, weekStart } from "./dates";
 
@@ -42,7 +42,12 @@ export async function buildCoachContext(p: Profile, today: string): Promise<stri
   out += line("Height", `${p.heightIn} in`);
   out += line("Started", `${p.startWeightLb} lb on ${p.startDate}`);
   out += line("Goal weight", `${p.goalWeightLb} lb`);
-  out += line("Chosen pace", `${p.paceLbPerWeek} lb/week`);
+  out += line(
+    "Phase",
+    p.phase === "maintain"
+      ? `maintenance: holding the trend within ${MAINTAIN_BAND_LB} lb of ${p.goalWeightLb} lb, not losing`
+      : `losing weight at a chosen pace of ${p.paceLbPerWeek} lb/week`,
+  );
   out += line("Daily calorie target", `${p.calorieTarget} kcal`);
   out += line("Daily protein target", `${p.proteinTargetG} g`);
   out += line("Daily water target", `${p.waterTargetOz} oz`);
@@ -155,7 +160,15 @@ export async function buildCheckinStats(p: Profile, today: string, start: string
     currentCalorieTarget: p.calorieTarget,
     targetPace: p.paceLbPerWeek,
   };
-  const suggested = suggestCalorieTarget(o.expenditure.kcal, p.paceLbPerWeek, p.sex);
+  const suggested = suggestTarget({
+    phase: p.phase,
+    expenditure: o.expenditure.kcal,
+    paceLbPerWeek: p.paceLbPerWeek,
+    sex: p.sex,
+    goalWeightLb: p.goalWeightLb,
+    currentTrend: o.currentTrend,
+    currentTarget: p.calorieTarget,
+  });
   return { stats, suggested, overview: o };
 }
 
@@ -163,10 +176,18 @@ export async function buildCheckinStats(p: Profile, today: string, start: string
 export function fallbackCheckinSummary(
   s: CheckinStats,
   suggested: number,
-  _p?: Pick<Profile, "phase">,
+  p?: Pick<Profile, "phase" | "goalWeightLb">,
 ): { headline: string; summary: string } {
   const parts: string[] = [];
-  if (s.trendChange !== null) {
+  const maintaining = p?.phase === "maintain";
+  if (maintaining && s.trendEnd !== null && p) {
+    const m = maintenanceStatus(s.trendEnd, p.goalWeightLb);
+    parts.push(
+      m.state === "in"
+        ? `Your trend weight ended the week at **${s.trendEnd} lb**, inside your maintenance range of ${m.low} to ${m.high} lb.`
+        : `Your trend weight ended the week at **${s.trendEnd} lb**, ${m.offBy} lb ${m.state} your maintenance range of ${m.low} to ${m.high} lb.`,
+    );
+  } else if (s.trendChange !== null) {
     parts.push(
       s.trendChange < -0.05
         ? `Your trend weight dropped **${Math.abs(s.trendChange)} lb** this week, against a target pace of ${s.targetPace} lb.`
@@ -183,11 +204,15 @@ export function fallbackCheckinSummary(
   if (s.avgWaterOz !== null) parts.push(`Water averaged ${s.avgWaterOz} oz on the days you tracked it.`);
   parts.push(
     Math.abs(suggested - s.currentCalorieTarget) >= 50
-      ? `Based on an estimated expenditure of ${s.expenditure} kcal, a target of **${suggested} kcal** matches your chosen pace.`
-      : `Your current target of ${s.currentCalorieTarget} kcal still matches your chosen pace.`,
+      ? `Based on an estimated expenditure of ${s.expenditure} kcal, a target of **${suggested} kcal** ${maintaining ? "fits maintenance" : "matches your chosen pace"}.`
+      : `Your current target of ${s.currentCalorieTarget} kcal still ${maintaining ? "fits maintenance" : "matches your chosen pace"}.`,
   );
   const headline =
-    s.trendChange === null
+    maintaining && s.trendEnd !== null && p
+      ? maintenanceStatus(s.trendEnd, p.goalWeightLb).state === "in"
+        ? "Holding steady in your range"
+        : `Trend ${maintenanceStatus(s.trendEnd, p.goalWeightLb).state} your range`
+      : s.trendChange === null
       ? "Not enough weigh-ins this week"
       : s.trendChange < -0.05
         ? `Down ${Math.abs(s.trendChange)} lb this week`

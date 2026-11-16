@@ -9,7 +9,7 @@ import { getVapidKeys } from "@/lib/push";
 import { lastTick } from "@/lib/scheduler";
 import { aiConfigured } from "@/lib/ai";
 import { authConfigured } from "@/lib/auth";
-import { suggestCalorieTarget } from "@/lib/calc";
+import { suggestTarget } from "@/lib/calc";
 import { getOverview, getProfile } from "@/lib/data";
 import { getClock } from "@/lib/session";
 
@@ -44,7 +44,16 @@ export default async function SettingsPage() {
       <SettingsForm
         today={today}
         expenditure={o.expenditure.kcal}
-        suggestedCalories={suggestCalorieTarget(o.expenditure.kcal, p.paceLbPerWeek, p.sex)}
+        phase={p.phase}
+        suggestedCalories={suggestTarget({
+          phase: p.phase,
+          expenditure: o.expenditure.kcal,
+          paceLbPerWeek: p.paceLbPerWeek,
+          sex: p.sex,
+          goalWeightLb: p.goalWeightLb,
+          currentTrend: o.currentTrend,
+          currentTarget: p.calorieTarget,
+        })}
         aiEnabled={aiConfigured()}
         authEnabled={authConfigured()}
         initial={{

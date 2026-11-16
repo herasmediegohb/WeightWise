@@ -326,6 +326,45 @@ export function suggestCalorieTarget(
   return Math.max(calorieFloor(sex), Math.round(raw / 10) * 10);
 }
 
+/** In maintenance, the trend may drift this far either side of the goal. */
+export const MAINTAIN_BAND_LB = 1.5;
+/** Largest weekly step up when moving from a deficit to maintenance calories. */
+export const MAINTAIN_STEP_KCAL = 150;
+
+export type MaintenanceStatus = { low: number; high: number; offBy: number; state: "in" | "above" | "below" };
+
+export function maintenanceStatus(trend: number, goal: number): MaintenanceStatus {
+  const low = goal - MAINTAIN_BAND_LB;
+  const high = goal + MAINTAIN_BAND_LB;
+  if (trend > high) return { low, high, offBy: round(trend - high, 1), state: "above" };
+  if (trend < low) return { low, high, offBy: round(low - trend, 1), state: "below" };
+  return { low, high, offBy: 0, state: "in" };
+}
+
+/**
+ * The calorie target the app suggests for the current phase.
+ * Losing: expenditure minus the deficit for the chosen pace.
+ * Maintaining: expenditure, nudged down 250 kcal above the band or up 200
+ * below it, and approached in steps of at most 150 kcal a week so the move
+ * out of a deficit is gradual.
+ */
+export function suggestTarget(opts: {
+  phase: "lose" | "maintain";
+  expenditure: number;
+  paceLbPerWeek: number;
+  sex: "male" | "female";
+  goalWeightLb: number;
+  currentTrend: number;
+  currentTarget: number;
+}): number {
+  if (opts.phase === "lose") return suggestCalorieTarget(opts.expenditure, opts.paceLbPerWeek, opts.sex);
+  const status = maintenanceStatus(opts.currentTrend, opts.goalWeightLb);
+  const desired = opts.expenditure + (status.state === "above" ? -250 : status.state === "below" ? 200 : 0);
+  const stepped =
+    desired > opts.currentTarget ? Math.min(desired, opts.currentTarget + MAINTAIN_STEP_KCAL) : desired;
+  return Math.max(calorieFloor(opts.sex), Math.round(stepped / 10) * 10);
+}
+
 export function suggestProteinTarget(goalWeightLb: number): number {
   // ~0.8 g per lb of goal weight: enough to protect muscle in a deficit.
   return Math.round((goalWeightLb * 0.8) / 5) * 5;

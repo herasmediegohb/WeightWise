@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { DownloadSimple, SignOut } from "@phosphor-icons/react";
 import { toast } from "sonner";
-import { deleteAllData, logout, saveProfile, type ProfileInput } from "@/app/actions";
+import { deleteAllData, logout, saveProfile, setPhase, type ProfileInput } from "@/app/actions";
 import { ACTIVITY } from "@/lib/calc";
 import { int } from "@/lib/utils";
 import { ImportButton } from "./import-button";
@@ -20,7 +20,9 @@ export function SettingsForm({
   aiEnabled,
   authEnabled,
   backups,
+  phase,
 }: {
+  phase: "lose" | "maintain";
   initial: ProfileInput;
   today: string;
   suggestedCalories: number;
@@ -95,7 +97,8 @@ export function SettingsForm({
             <Field label="Calories" type="number" inputMode="numeric" suffix="kcal" value={f.calorieTarget} onChange={set("calorieTarget")} />
             <div className="mt-2 flex items-center justify-between gap-3 rounded-2xl bg-surface-2 px-3.5 py-2.5 text-sm">
               <p className="text-muted tnum">
-                You burn about {int(expenditure)} kcal a day. For {pace} lb a week, that suggests{" "}
+                You burn about {int(expenditure)} kcal a day.{" "}
+                {phase === "maintain" ? "For maintenance, the next step is" : `For ${pace} lb a week, that suggests`}{" "}
                 <span className="font-semibold text-fg">{int(suggestedCalories)} kcal</span>.
               </p>
               {Number(f.calorieTarget) !== suggestedCalories && (
@@ -122,12 +125,39 @@ export function SettingsForm({
 
         <Card className="space-y-4">
           <h2 className="font-semibold">Goal</h2>
+          <div>
+            <p className="mb-1.5 text-sm font-medium">Phase</p>
+            <Segmented
+              label="Phase"
+              value={phase}
+              onChange={async (v) => {
+                if (v === phase) return;
+                const res = await setPhase(v);
+                if (!res.ok) return toast.error(res.error);
+                setF((cur) => ({ ...cur, calorieTarget: String(res.calorieTarget) }));
+                toast.success(
+                  v === "maintain"
+                    ? `Maintenance on. Calories go up gradually, now ${int(res.calorieTarget)} kcal.`
+                    : `Back to losing weight. Target ${int(res.calorieTarget)} kcal.`,
+                );
+              }}
+              options={[
+                { value: "lose", label: "Losing weight" },
+                { value: "maintain", label: "Maintaining" },
+              ]}
+            />
+            <p className="mt-1.5 text-sm text-muted">
+              {phase === "maintain"
+                ? "Holding your goal weight, give or take 1.5 lb. The weekly check-in keeps calories on track."
+                : "Each weekly check-in suggests calories for your chosen pace."}
+            </p>
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Starting weight" type="number" inputMode="decimal" step="0.1" suffix="lb" value={f.startWeightLb} onChange={set("startWeightLb")} />
             <Field label="Start date" type="date" max={today} value={f.startDate} onChange={set("startDate")} />
           </div>
           <Field label="Goal weight" type="number" inputMode="decimal" step="0.1" suffix="lb" value={f.goalWeightLb} onChange={set("goalWeightLb")} />
-          <div>
+          <div className={phase === "maintain" ? "hidden" : undefined}>
             <p className="mb-1.5 text-sm font-medium">Pace, lb per week</p>
             <Segmented label="Weekly loss pace" value={pace} onChange={touch(setPace)} options={paceOptions.map((v) => ({ value: v, label: v }))} />
           </div>

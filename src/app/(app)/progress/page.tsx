@@ -4,7 +4,7 @@ import { IntakeChart } from "@/components/intake-chart";
 import { BodyComposition, WeighInHistory } from "@/components/progress-lists";
 import { Card, Eyebrow } from "@/components/ui";
 import { WeightChart } from "@/components/weight-chart";
-import { MIN_COMPLETE_DAY_KCAL, bmiCategory } from "@/lib/calc";
+import { MIN_COMPLETE_DAY_KCAL, bmiCategory, maintenanceStatus } from "@/lib/calc";
 import { getOverview, getProfile, getScans } from "@/lib/data";
 import { addDays, diffDays, formatFull, formatRange } from "@/lib/dates";
 import { getClock } from "@/lib/session";
@@ -30,6 +30,7 @@ export default async function ProgressPage() {
       const w = o.weights.find((x) => x.date === pt.date)!;
       return { id: w.id, date: w.date, weightLb: w.weightLb, note: w.note, trend: pt.trend };
     });
+  const maint = p.phase === "maintain" ? maintenanceStatus(o.currentTrend, p.goalWeightLb) : null;
   const impliedPace = ((e.kcal - p.calorieTarget) * 7) / 3500;
 
   const tiles = [
@@ -40,7 +41,13 @@ export default async function ProgressPage() {
       sub: o.range === null ? "needs more weigh-ins" : `likely ${signed(o.range.fast)} to ${signed(o.range.slow)}, target ${signed(-p.paceLbPerWeek)}`,
     },
     { label: "BMI", value: num(o.bmi), sub: bmiCategory(o.bmi) },
-    {
+    p.phase === "maintain"
+      ? {
+          label: "Maintenance",
+          value: maint!.state === "in" ? "In range" : `${num(maint!.offBy)} lb ${maint!.state}`,
+          sub: `range ${num(maint!.low)} to ${num(maint!.high)} lb`,
+        }
+      : {
       label: "Goal date",
       value: o.goal.date ? formatFull(o.goal.date) : "–",
       sub: o.goal.date

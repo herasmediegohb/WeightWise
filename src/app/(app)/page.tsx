@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { ArrowRight, Flag, Sparkle } from "@phosphor-icons/react/dist/ssr";
 import { desc, eq } from "drizzle-orm";
 import { NutritionCard } from "@/components/nutrition-card";
+import { GoalReachedCard } from "@/components/phase-cards";
+import { maintenanceStatus } from "@/lib/calc";
 import { Card, Eyebrow } from "@/components/ui";
 import { WaterCard } from "@/components/water-card";
 import { WeightHero } from "@/components/weight-hero";
@@ -34,7 +36,10 @@ export default async function TodayPage() {
   const todayLog = o.weights.find((w) => w.date === today) ?? null;
   const previous = o.weights.filter((w) => w.date < today).at(-1) ?? null;
   const recent = o.points.filter((pt) => pt.date >= addDays(today, -60));
-  const next = o.milestones.find((m) => !m.achievedOn) ?? null;
+  const maintaining = p.phase === "maintain";
+  const maintenance = maintaining ? maintenanceStatus(o.currentTrend, p.goalWeightLb) : null;
+  const reachedGoal = !maintaining && o.points.length > 0 && o.currentTrend <= p.goalWeightLb;
+  const next = maintaining || reachedGoal ? null : (o.milestones.find((m) => !m.achievedOn) ?? null);
   const reached = o.milestones.filter((m) => m.achievedOn).length;
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
   const checkinDue = checkins[0]?.weekStart !== lastCompletedWeekStart(today) && o.points.length >= 3;
@@ -67,6 +72,7 @@ export default async function TodayPage() {
           progress={o.progress}
           startWeight={p.startWeightLb}
           goalWeight={p.goalWeightLb}
+          maintenance={maintenance}
         />
         <WaterCard date={today} total={water} target={p.waterTargetOz} lastOz={waterRows[0]?.oz ?? null} />
         <NutritionCard
@@ -83,6 +89,7 @@ export default async function TodayPage() {
         />
 
         <div className="grid gap-4">
+          {reachedGoal && <GoalReachedCard goalLabel={`${num(p.goalWeightLb)} lb`} />}
           {next && (
             <Card>
               <div className="flex items-center justify-between">

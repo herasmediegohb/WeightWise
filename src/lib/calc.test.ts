@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  maintenanceStatus,
+  suggestTarget,
   bodyFatPlan,
   rateRange,
   bmi,
@@ -205,5 +207,24 @@ describe("bodyFatPlan", () => {
 
   it("needs a scan with body fat", () => {
     expect(bodyFatPlan({ scan: null, points, currentTrend: 176, range, today: "2026-10-30" })).toBeNull();
+  });
+});
+
+describe("maintenance", () => {
+  const base = { phase: "maintain" as const, expenditure: 2400, paceLbPerWeek: 1, sex: "male" as const, goalWeightLb: 165 };
+  it("steps up gradually from a deficit", () => {
+    expect(suggestTarget({ ...base, currentTrend: 165, currentTarget: 1900 })).toBe(2050);
+    expect(suggestTarget({ ...base, currentTrend: 165, currentTarget: 2350 })).toBe(2400);
+  });
+  it("trims when above the band and adds when below", () => {
+    expect(suggestTarget({ ...base, currentTrend: 167.2, currentTarget: 2400 })).toBe(2150);
+    expect(suggestTarget({ ...base, currentTrend: 163, currentTarget: 2400 })).toBe(2550);
+  });
+  it("uses the pace when losing", () => {
+    expect(suggestTarget({ ...base, phase: "lose", currentTrend: 170, currentTarget: 1900 })).toBe(1900);
+  });
+  it("reports where the trend sits against the band", () => {
+    expect(maintenanceStatus(165.9, 165).state).toBe("in");
+    expect(maintenanceStatus(167, 165)).toMatchObject({ state: "above", offBy: 0.5 });
   });
 });

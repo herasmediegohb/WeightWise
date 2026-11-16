@@ -4,7 +4,8 @@ import { useState, useTransition } from "react";
 import { Check, PencilSimple, TrendDown, TrendUp } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { logWeight } from "@/app/actions";
-import type { TrendPoint } from "@/lib/calc";
+import type { MaintenanceStatus, TrendPoint } from "@/lib/calc";
+import { BandBar } from "./phase-cards";
 import { formatShort } from "@/lib/dates";
 import { cn, num, signed } from "@/lib/utils";
 import { Bar, Button, Card, Eyebrow, IconButton } from "./ui";
@@ -50,6 +51,7 @@ export function WeightHero({
   progress,
   startWeight,
   goalWeight,
+  maintenance,
   className,
 }: {
   today: string;
@@ -64,6 +66,8 @@ export function WeightHero({
   progress: number;
   startWeight: number;
   goalWeight: number;
+  /** In maintenance, the range bar replaces the progress-to-goal bar. */
+  maintenance?: MaintenanceStatus | null;
   className?: string;
 }) {
   const [sheet, setSheet] = useState<WeightSheetState>(null);
@@ -201,6 +205,19 @@ export function WeightHero({
         <Sparkline points={recent} />
       </div>
 
+      {maintenance ? (
+        <div className="mt-4">
+          <p className="mb-2 text-sm text-muted">
+            Maintaining <span className="font-semibold text-fg tnum">{num(goalWeight)} lb</span>
+          </p>
+          <BandBar
+            status={maintenance}
+            trend={latest?.trend ?? goalWeight}
+            goal={goalWeight}
+            labels={{ low: `${num(maintenance.low)} lb`, high: `${num(maintenance.high)} lb`, offBy: `${num(maintenance.offBy)} lb` }}
+          />
+        </div>
+      ) : (
       <div className="mt-4">
         <Bar value={progress} label={`${Math.round(progress * 100)}% of the way to your goal weight`} />
         <div className="mt-2 flex justify-between text-sm tnum">
@@ -212,6 +229,7 @@ export function WeightHero({
           </span>
         </div>
       </div>
+      )}
       <WeightSheet state={sheet} onClose={() => setSheet(null)} today={today} />
     </Card>
   );
