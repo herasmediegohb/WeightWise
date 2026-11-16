@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   devIndicators: false,
-  serverExternalPackages: ["@electric-sql/pglite", "postgres"],
+  serverExternalPackages: ["@electric-sql/pglite", "pg"],
   turbopack: {
     rules: {
       "*.css": {

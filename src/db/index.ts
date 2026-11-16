@@ -1,7 +1,7 @@
 import "server-only";
 import path from "node:path";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
-import { checkConnectionString, sslFor } from "@/lib/db-errors";
+import { checkConnectionString, pgConnectionOptions } from "@/lib/db-errors";
 import * as schema from "./schema";
 
 export type DB = PgDatabase<PgQueryResultHKT, typeof schema>;
@@ -11,19 +11,29 @@ const globalForDb = globalThis as unknown as { __wwDb?: Promise<DB> };
 async function connect(): Promise<DB> {
   const url = process.env.DATABASE_URL;
   if (url) {
-    // Hosted Postgres (Supabase / Neon). `prepare: false` keeps this
-    // compatible with transaction-mode connection poolers.
     const problem = checkConnectionString(url);
     if (problem) throw Object.assign(new Error(problem.title), { dbProblem: problem });
-    const { default: postgres } = await import("postgres");
-    const { drizzle } = await import("drizzle-orm/postgres-js");
-    const client = postgres(url, {
-      prepare: false,
-      max: 1,
-      ssl: sslFor(url),
-      connect_timeout: 10,
+    const { Pool } = await import("pg");
+    const { drizzle } = await import("drizzle-orm/node-postgres");
+    const pool = new Pool({
+      ...pgConnectionOptions(url),
+      max: 3,
+      idleTimeoutMillis: 5_000,
+      connectionTimeoutMillis: 10_000,
+      // A query that hangs becomes an error with an explanation instead of
+      // a page that spins until Vercel's gateway timeout.
+      query_timeout: 15_000,
     });
-    return drizzle(client, { schema }) as unknown as DB;
+    // Errors on idle connections (e.g. the pooler closing them) must not
+    // crash the function; the next query opens a fresh connection.
+    pool.on("error", (err) => console.error("[db pool]", err.message));
+    if (process.env.VERCEL) {
+      // Closes idle connections before Vercel suspends the function, so a
+      // resumed function never reuses a dead socket.
+      const { attachDatabasePool } = await import("@vercel/functions");
+      attachDatabasePool(pool);
+    }
+    return drizzle(pool, { schema }) as unknown as DB;
   }
   if (process.env.VERCEL) {
     const problem = checkConnectionString(undefined)!;

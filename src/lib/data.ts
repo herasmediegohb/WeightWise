@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { and, asc, desc, eq, gte, lte, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import type { Profile } from "@/db/schema";
@@ -20,11 +21,12 @@ import { addDays } from "./dates";
 const { profile, weightLogs, foodEntries, waterLogs, bodyScans, savedMeals, checkins, chatMessages } =
   schema;
 
-export async function getProfile(): Promise<Profile | null> {
+/** Cached per request, so the layout and the page share one query. */
+export const getProfile = cache(async (): Promise<Profile | null> => {
   const db = await getDb();
   const rows = await db.select().from(profile).where(eq(profile.id, 1)).limit(1);
   return rows[0] ?? null;
-}
+});
 
 export async function getWeights() {
   const db = await getDb();

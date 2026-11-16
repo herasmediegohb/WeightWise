@@ -3,7 +3,7 @@ import { CheckCircle, MinusCircle, WarningCircle } from "@phosphor-icons/react/d
 import { Logo } from "@/components/nav";
 import { aiConfigured } from "@/lib/ai";
 import { authConfigured } from "@/lib/auth";
-import { describeConnectionString } from "@/lib/db-errors";
+import { VERCEL_REGION_FOR, describeConnectionString, supabaseRegion } from "@/lib/db-errors";
 import { checkDatabase } from "@/lib/db-health";
 
 export const metadata = { title: "Setup status" };
@@ -17,6 +17,11 @@ type Check = { name: string; state: "ok" | "bad" | "off"; detail: string; fix?: 
  */
 export default async function StatusPage() {
   const db = await checkDatabase();
+  const appRegion = process.env.VERCEL_REGION ?? null;
+  const dbRegion = supabaseRegion(process.env.DATABASE_URL);
+  const best = dbRegion ? VERCEL_REGION_FOR[dbRegion] : undefined;
+  const mismatch = Boolean(appRegion && best && appRegion !== best.code);
+  const slow = db.ok && db.roundTripMs > 25;
   const checks: Check[] = [
     authConfigured()
       ? { name: "App password", state: "ok", detail: "APP_PASSWORD is set." }
@@ -43,6 +48,24 @@ export default async function StatusPage() {
           fix: "Add ANTHROPIC_API_KEY in Vercel → Settings → Environment Variables, then redeploy.",
         },
   ];
+  if (db.ok) {
+    checks.push(
+      mismatch || slow
+        ? {
+            name: "Speed",
+            state: "bad",
+            detail: `Each database request takes about ${db.roundTripMs} ms${appRegion ? `. The app runs in ${appRegion}` : ""}${dbRegion ? ` and the database is in ${dbRegion}` : ""}. Every screen makes several requests, so this adds up.`,
+            fix: best
+              ? `Run the app next to the database: in Vercel open Settings → Functions, set Function Region to ${best.place} (${best.code}), save, and redeploy.`
+              : "Run the app in the region closest to your database: Vercel → Settings → Functions → Function Region, then redeploy.",
+          }
+        : {
+            name: "Speed",
+            state: "ok",
+            detail: `Database requests take about ${db.roundTripMs} ms${appRegion ? ` (app in ${appRegion}${dbRegion ? `, database in ${dbRegion}` : ""})` : ""}.`,
+          },
+    );
+  }
   const allGood = checks.every((c) => c.state !== "bad");
 
   return (
@@ -70,6 +93,12 @@ export default async function StatusPage() {
           </li>
         ))}
       </ul>
+      {db.ok && (
+        <p className="mt-4 text-sm text-muted tnum">
+          First database request took {db.firstMs} ms
+          {db.firstMs > db.roundTripMs * 3 ? " (includes opening the connection)" : ""}.
+        </p>
+      )}
       {allGood && (
         <Link href="/" className="mt-6 inline-flex h-11 items-center rounded-2xl bg-lime px-4 font-semibold text-on-lime">
           Open WeightWise

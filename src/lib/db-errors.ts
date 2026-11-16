@@ -99,7 +99,16 @@ export function classifyDbError(err: unknown): DbProblem {
       fix: "Copy the Transaction pooler string again from Supabase → Connect. Make sure nothing was cut off when pasting.",
     };
   }
-  if (["ETIMEDOUT", "ECONNREFUSED", "ENETUNREACH", "EHOSTUNREACH", "ECONNRESET", "CONNECT_TIMEOUT"].some(has)) {
+  if (/query read timeout/i.test(text)) {
+    return {
+      title: "The database took too long to answer",
+      fix: "Reload the page. If this keeps happening, open the setup status page: it measures how far your database is from the app's servers.",
+    };
+  }
+  if (
+    ["ETIMEDOUT", "ECONNREFUSED", "ENETUNREACH", "EHOSTUNREACH", "ECONNRESET", "CONNECT_TIMEOUT"].some(has) ||
+    /timeout exceeded when trying to connect|connection terminated/i.test(text)
+  ) {
     return {
       title: "Couldn't reach the database",
       code: codes.find((c) => /^E|CONNECT/.test(c)),
@@ -133,13 +142,51 @@ export function classifyDbError(err: unknown): DbProblem {
   };
 }
 
-/** SSL setting for postgres.js: required for hosted databases, off for local ones. */
-export function sslFor(url: string): false | "require" | undefined {
+/**
+ * Connection settings for node-postgres. Hosted databases use TLS without
+ * certificate verification (Supabase's pooler uses its own CA); local ones
+ * use no TLS. An sslmode in the string is honoured but never forces strict
+ * verification, which would reject Supabase's certificate.
+ */
+export function pgConnectionOptions(url: string): { connectionString: string; ssl: false | { rejectUnauthorized: false } } {
+  const u = new URL(url);
+  const mode = u.searchParams.get("sslmode");
+  u.searchParams.delete("sslmode");
+  const local = ["localhost", "127.0.0.1", "::1"].includes(u.hostname);
+  const ssl = mode === "disable" || (local && !mode) ? false : { rejectUnauthorized: false as const };
+  return { connectionString: u.toString(), ssl };
+}
+
+/** Region of a Supabase pooler host, e.g. aws-0-sa-east-1.pooler.supabase.com -> sa-east-1. */
+export function supabaseRegion(url: string | undefined): string | null {
+  if (!url) return null;
   try {
-    const u = new URL(url);
-    if (u.searchParams.has("sslmode")) return undefined; // let the string decide
-    return ["localhost", "127.0.0.1", "::1"].includes(u.hostname) ? false : "require";
+    const m = new URL(url).hostname.match(/^aws-\d+-([a-z]+-[a-z]+-\d)\.pooler\.supabase\.com$/);
+    return m ? m[1] : null;
   } catch {
-    return undefined;
+    return null;
   }
 }
+
+/** Closest Vercel function region for each Supabase (AWS) region. */
+export const VERCEL_REGION_FOR: Record<string, { code: string; place: string }> = {
+  "us-east-1": { code: "iad1", place: "Washington, D.C." },
+  "us-east-2": { code: "cle1", place: "Cleveland" },
+  "us-west-1": { code: "sfo1", place: "San Francisco" },
+  "us-west-2": { code: "pdx1", place: "Portland" },
+  "ca-central-1": { code: "yul1", place: "Montréal" },
+  "sa-east-1": { code: "gru1", place: "São Paulo" },
+  "eu-west-1": { code: "dub1", place: "Dublin" },
+  "eu-west-2": { code: "lhr1", place: "London" },
+  "eu-west-3": { code: "cdg1", place: "Paris" },
+  "eu-central-1": { code: "fra1", place: "Frankfurt" },
+  "eu-central-2": { code: "fra1", place: "Frankfurt" },
+  "eu-north-1": { code: "arn1", place: "Stockholm" },
+  "ap-south-1": { code: "bom1", place: "Mumbai" },
+  "ap-southeast-1": { code: "sin1", place: "Singapore" },
+  "ap-southeast-2": { code: "syd1", place: "Sydney" },
+  "ap-northeast-1": { code: "hnd1", place: "Tokyo" },
+  "ap-northeast-2": { code: "icn1", place: "Seoul" },
+  "ap-northeast-3": { code: "kix1", place: "Osaka" },
+  "ap-east-1": { code: "hkg1", place: "Hong Kong" },
+};
