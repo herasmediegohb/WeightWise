@@ -1,0 +1,126 @@
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { ArrowRight, Flag, Sparkle } from "@phosphor-icons/react/dist/ssr";
+import { desc, eq } from "drizzle-orm";
+import { NutritionCard } from "@/components/nutrition-card";
+import { Card, Eyebrow } from "@/components/ui";
+import { WaterCard } from "@/components/water-card";
+import { WeightHero } from "@/components/weight-hero";
+import { getDb, schema } from "@/db";
+import { aiConfigured } from "@/lib/ai";
+import { lastCompletedWeekStart } from "@/lib/coach";
+import { getCheckins, getOverview, getProfile, getRecentFoods, getSavedMeals } from "@/lib/data";
+import { addDays, formatFull, formatLong } from "@/lib/dates";
+import { mealForHour } from "@/lib/meals";
+import { getClock } from "@/lib/session";
+import { num } from "@/lib/utils";
+
+export default async function TodayPage() {
+  const p = await getProfile();
+  if (!p) redirect("/onboarding");
+  const { today, hour } = await getClock();
+  const db = await getDb();
+  const [o, saved, recents, checkins, waterRows] = await Promise.all([
+    getOverview(p, today),
+    getSavedMeals(),
+    getRecentFoods(),
+    getCheckins(1),
+    db.select().from(schema.waterLogs).where(eq(schema.waterLogs.date, today)).orderBy(desc(schema.waterLogs.id)),
+  ]);
+
+  const totals = o.totals.get(today) ?? { calories: 0, proteinG: 0, carbsG: 0, fatG: 0 };
+  const water = waterRows.reduce((a, r) => a + r.oz, 0);
+  const todayLog = o.weights.find((w) => w.date === today) ?? null;
+  const recent = o.points.filter((pt) => pt.date >= addDays(today, -60));
+  const next = o.milestones.find((m) => !m.achievedOn) ?? null;
+  const reached = o.milestones.filter((m) => m.achievedOn).length;
+  const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  const checkinDue = checkins[0]?.weekStart !== lastCompletedWeekStart(today) && o.points.length >= 3;
+
+  const nudge = checkinDue
+    ? { title: "Your weekly check-in is ready", body: "See how last week went and whether your calorie target still fits.", href: "/coach" }
+    : o.stalled
+      ? { title: "Your trend has been flat for two weeks", body: "Ask the coach to look at what the data says.", href: `/coach?ask=${encodeURIComponent("Why has my weight stalled?")}` }
+      : { title: "Need a meal idea?", body: "Get options that fit the calories and protein you have left today.", href: `/coach?ask=${encodeURIComponent("Give me meal ideas for what I have left today.")}` };
+
+  return (
+    <div>
+      <header className="mb-5">
+        <p className="text-sm text-muted">{formatLong(today)}</p>
+        <h1 className="mt-0.5 text-3xl font-semibold tracking-tight">
+          {greeting}, {p.name.split(" ")[0]}
+        </h1>
+      </header>
+
+      <div className="rise grid gap-4 lg:grid-cols-2 lg:items-start">
+        <WeightHero
+          today={today}
+          latest={o.latest}
+          todayLog={todayLog && { id: todayLog.id, weightLb: todayLog.weightLb, note: todayLog.note }}
+          recent={recent.length >= 2 ? recent : o.points.slice(-12)}
+          rate={o.rate}
+          lost={o.lost}
+          remaining={o.remaining}
+          progress={o.progress}
+          startWeight={p.startWeightLb}
+          goalWeight={p.goalWeightLb}
+        />
+        <WaterCard date={today} total={water} target={p.waterTargetOz} lastOz={waterRows[0]?.oz ?? null} />
+        <NutritionCard
+          date={today}
+          eaten={totals.calories}
+          protein={totals.proteinG}
+          carbs={totals.carbsG}
+          fat={totals.fatG}
+          calorieTarget={p.calorieTarget}
+          proteinTarget={p.proteinTargetG}
+          defaultMeal={mealForHour(hour)}
+          saved={saved.map((m) => ({ id: m.id, name: m.name, items: m.items }))}
+          recents={recents.map((r) => ({ id: r.id, name: r.name, quantity: r.quantity ?? "", calories: r.calories, proteinG: r.proteinG, carbsG: r.carbsG, fatG: r.fatG }))}
+          aiEnabled={aiConfigured()}
+        />
+
+        <div className="grid gap-4">
+          {next && (
+            <Card>
+              <div className="flex items-center justify-between">
+                <Eyebrow className="flex items-center gap-1.5">
+                  <Flag size={16} weight="fill" className="text-accent" aria-hidden />
+                  Next milestone
+                </Eyebrow>
+                <span className="text-sm text-muted tnum">
+                  {reached} of {o.milestones.length} reached
+                </span>
+              </div>
+              <p className="mt-2 text-2xl font-semibold tracking-tight">{next.label}</p>
+              <p className="mt-1 text-[15px] text-muted tnum">
+                <span className="font-semibold text-fg">{num(Math.max(0, o.currentTrend - next.weight))} lb</span> to go
+                {next.projectedOn ? `, on track for ${formatFull(next.projectedOn)}` : ""}
+              </p>
+              {o.goalDate && next.key !== String(p.goalWeightLb) && (
+                <p className="mt-3 border-t border-border pt-3 text-sm text-muted">
+                  Goal weight of {num(p.goalWeightLb)} lb projected for{" "}
+                  <span className="font-medium text-fg">{formatFull(o.goalDate)}</span>
+                </p>
+              )}
+            </Card>
+          )}
+
+          <Link
+            href={nudge.href}
+            className="group flex items-center gap-4 rounded-3xl border border-border bg-surface p-5 shadow-card transition-transform active:scale-[0.99]"
+          >
+            <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-lime text-on-lime" aria-hidden>
+              <Sparkle size={22} weight="fill" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block font-semibold">{nudge.title}</span>
+              <span className="block text-sm text-muted">{nudge.body}</span>
+            </span>
+            <ArrowRight size={18} weight="bold" className="shrink-0 text-muted transition-transform group-hover:translate-x-0.5" aria-hidden />
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
