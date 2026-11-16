@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import {
   BookmarkSimple,
   Camera,
+  CopySimple,
+  Lightning,
   ClockCounterClockwise,
   Minus,
   Plus,
@@ -15,14 +17,23 @@ import { toast } from "sonner";
 import { addFood, deleteSavedMeal } from "@/app/actions";
 import type { FoodItem } from "@/db/schema";
 import { MEALS, type Meal } from "@/lib/meals";
-import { cn, int } from "@/lib/utils";
+import { int } from "@/lib/utils";
+import { BarcodeTab } from "./barcode-tab";
 import { Button, Empty, Field, IconButton, Segmented, Sheet, Spinner } from "./ui";
 
 export type SavedMealLite = { id: number; name: string; items: FoodItem[] };
-export type RecentFood = FoodItem & { id: number };
+export type QuickFoodLite = FoodItem & { timesLogged: number };
+export type PastMealLite = { meal: Meal; items: FoodItem[]; calories: number };
+/** Everything the Quick tab offers for one-tap logging. */
+export type QuickData = {
+  saved: SavedMealLite[];
+  frequent: QuickFoodLite[];
+  /** Meals from the day before the one being logged. */
+  previous: PastMealLite[];
+};
 
 type Draft = FoodItem & { key: number; servings: number };
-type Tab = "describe" | "saved" | "manual";
+type Tab = "describe" | "scan" | "quick" | "manual";
 
 /** Downscales a photo in the browser so uploads stay small and fast. */
 async function toJpeg(file: File): Promise<{ data: string; mediaType: string; preview: string }> {
@@ -52,8 +63,7 @@ type FoodSheetProps = {
   date: string;
   dateLabel: string;
   defaultMeal: Meal;
-  saved: SavedMealLite[];
-  recents: RecentFood[];
+  quick: QuickData;
   aiEnabled: boolean;
 };
 
@@ -75,11 +85,10 @@ function FoodSheetBody({
   date,
   dateLabel,
   defaultMeal,
-  saved,
-  recents,
+  quick,
   aiEnabled,
 }: FoodSheetProps) {
-  const [tab, setTab] = useState<Tab>(aiEnabled ? "describe" : saved.length || recents.length ? "saved" : "manual");
+  const [tab, setTab] = useState<Tab>(aiEnabled ? "describe" : hasQuick(quick) ? "quick" : "manual");
   const [meal, setMeal] = useState<Meal>(defaultMeal);
   const [text, setText] = useState("");
   const [photo, setPhoto] = useState<{ data: string; mediaType: string; preview: string } | null>(null);
@@ -144,13 +153,18 @@ function FoodSheetBody({
     }
   }
 
-  async function log(items: FoodItem[], src: "ai_text" | "ai_photo" | "manual" | "saved", extra?: { saveAs?: string; savedMealId?: number }) {
+  async function log(
+    items: FoodItem[],
+    src: "ai_text" | "ai_photo" | "manual" | "saved" | "barcode",
+    extra?: { saveAs?: string; savedMealId?: number; meal?: Meal },
+  ) {
+    const target = extra?.meal ?? meal;
     setSaving(true);
-    const res = await addFood({ date, meal, items, source: src, ...extra });
+    const res = await addFood({ date, meal: target, items, source: src, saveAs: extra?.saveAs, savedMealId: extra?.savedMealId });
     setSaving(false);
     if (!res.ok) return toast.error(res.error);
     const kcal = items.reduce((a, i) => a + i.calories, 0);
-    toast.success(`Logged ${int(kcal)} kcal to ${meal}`);
+    toast.success(`Logged ${int(kcal)} kcal to ${target}`);
     onOpenChange(false);
   }
 
@@ -268,7 +282,8 @@ function FoodSheetBody({
             onChange={setTab}
             options={[
               { value: "describe", label: "Describe" },
-              { value: "saved", label: "Saved" },
+              { value: "scan", label: "Scan" },
+              { value: "quick", label: "Quick" },
               { value: "manual", label: "Manual" },
             ]}
           />
@@ -341,23 +356,55 @@ function FoodSheetBody({
             </div>
           )}
 
-          {tab === "saved" && (
+          {tab === "scan" && (
             <div className="mt-4">
-              {!saved.length && !recents.length ? (
+              <BarcodeTab
+                saving={saving}
+                onLog={(items) => log(items, "barcode")}
+                onMissing={() => {
+                  setTab("describe");
+                  setTimeout(() => fileRef.current?.click(), 50);
+                }}
+              />
+            </div>
+          )}
+
+          {tab === "quick" && (
+            <div className="mt-4">
+              {!hasQuick(quick) ? (
                 <Empty
-                  icon={<BookmarkSimple size={24} />}
-                  title="Nothing saved yet"
-                  body="Meals you save and foods you've logged recently show up here for one-tap logging."
+                  icon={<Lightning size={24} />}
+                  title="Nothing here yet"
+                  body="Yesterday's meals, foods you log often, and meals you save show up here for one-tap logging."
                 />
               ) : (
-                <>
-                  {saved.length > 0 && (
-                    <>
+                <div className="space-y-5">
+                  {quick.previous.length > 0 && (
+                    <section>
+                      <h3 className="mb-2 flex items-center gap-1.5 text-sm font-medium text-muted">
+                        <CopySimple size={16} aria-hidden /> Same as the day before
+                      </h3>
+                      <ul className="space-y-2">
+                        {quick.previous.map((m) => (
+                          <li key={m.meal}>
+                            <QuickRow
+                              title={`${MEALS.find((x) => x.value === m.meal)!.label}: ${m.items.map((i) => i.name).join(", ")}`}
+                              sub={`${int(m.calories)} kcal · ${int(m.items.reduce((a, i) => a + i.proteinG, 0))} g protein`}
+                              disabled={saving}
+                              onClick={() => log(m.items, "saved", { meal: m.meal })}
+                            />
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
+                  {quick.saved.length > 0 && (
+                    <section>
                       <h3 className="mb-2 flex items-center gap-1.5 text-sm font-medium text-muted">
                         <BookmarkSimple size={16} aria-hidden /> Saved meals
                       </h3>
                       <ul className="space-y-2">
-                        {saved.map((m) => {
+                        {quick.saved.map((m) => {
                           const kcal = m.items.reduce((a, i) => a + i.calories, 0);
                           const pro = m.items.reduce((a, i) => a + i.proteinG, 0);
                           return (
@@ -383,19 +430,19 @@ function FoodSheetBody({
                           );
                         })}
                       </ul>
-                    </>
+                    </section>
                   )}
-                  {recents.length > 0 && (
-                    <>
-                      <h3 className={cn("mb-2 flex items-center gap-1.5 text-sm font-medium text-muted", saved.length > 0 && "mt-5")}>
-                        <ClockCounterClockwise size={16} aria-hidden /> Recent foods
+                  {quick.frequent.length > 0 && (
+                    <section>
+                      <h3 className="mb-2 flex items-center gap-1.5 text-sm font-medium text-muted">
+                        <ClockCounterClockwise size={16} aria-hidden /> Your usual foods
                       </h3>
                       <ul className="space-y-2">
-                        {recents.map((r) => (
-                          <li key={r.id}>
+                        {quick.frequent.map((r) => (
+                          <li key={`${r.name}|${r.quantity}`}>
                             <QuickRow
                               title={r.name}
-                              sub={`${r.quantity ? `${r.quantity} · ` : ""}${int(r.calories)} kcal · ${int(r.proteinG)} g protein`}
+                              sub={`${r.quantity ? `${r.quantity} · ` : ""}${int(r.calories)} kcal · ${int(r.proteinG)} g protein${r.timesLogged > 1 ? ` · logged ${r.timesLogged}×` : ""}`}
                               disabled={saving}
                               onClick={() =>
                                 log([{ name: r.name, quantity: r.quantity, calories: r.calories, proteinG: r.proteinG, carbsG: r.carbsG, fatG: r.fatG }], "saved")
@@ -404,9 +451,9 @@ function FoodSheetBody({
                           </li>
                         ))}
                       </ul>
-                    </>
+                    </section>
                   )}
-                </>
+                </div>
               )}
             </div>
           )}
@@ -448,6 +495,10 @@ function FoodSheetBody({
       )}
     </Sheet>
   );
+}
+
+function hasQuick(q: QuickData): boolean {
+  return q.saved.length > 0 || q.frequent.length > 0 || q.previous.length > 0;
 }
 
 function QuickRow({ title, sub, onClick, disabled }: { title: string; sub: string; onClick: () => void; disabled?: boolean }) {

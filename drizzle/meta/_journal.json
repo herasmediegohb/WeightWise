@@ -8,6 +8,13 @@
       "when": 1794788569600,
       "tag": "0000_cute_nuke",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794794185766,
+      "tag": "0001_dry_johnny_blaze",
+      "breakpoints": true
     }
   ]
 }

@@ -9,7 +9,7 @@ import { WeightHero } from "@/components/weight-hero";
 import { getDb, schema } from "@/db";
 import { aiConfigured } from "@/lib/ai";
 import { lastCompletedWeekStart } from "@/lib/coach";
-import { getCheckins, getOverview, getProfile, getRecentFoods, getSavedMeals } from "@/lib/data";
+import { getCheckins, getFrequentFoods, getMealsForDay, getOverview, getProfile, getSavedMeals } from "@/lib/data";
 import { addDays, formatFull, formatLong, formatRange } from "@/lib/dates";
 import { mealForHour } from "@/lib/meals";
 import { getClock } from "@/lib/session";
@@ -20,10 +20,11 @@ export default async function TodayPage() {
   if (!p) redirect("/onboarding");
   const { today, hour } = await getClock();
   const db = await getDb();
-  const [o, saved, recents, checkins, waterRows] = await Promise.all([
+  const [o, saved, frequent, yesterdayMeals, checkins, waterRows] = await Promise.all([
     getOverview(p, today),
     getSavedMeals(),
-    getRecentFoods(),
+    getFrequentFoods(today),
+    getMealsForDay(addDays(today, -1)),
     getCheckins(1),
     db.select().from(schema.waterLogs).where(eq(schema.waterLogs.date, today)).orderBy(desc(schema.waterLogs.id)),
   ]);
@@ -77,8 +78,7 @@ export default async function TodayPage() {
           calorieTarget={p.calorieTarget}
           proteinTarget={p.proteinTargetG}
           defaultMeal={mealForHour(hour)}
-          saved={saved.map((m) => ({ id: m.id, name: m.name, items: m.items }))}
-          recents={recents.map((r) => ({ id: r.id, name: r.name, quantity: r.quantity ?? "", calories: r.calories, proteinG: r.proteinG, carbsG: r.carbsG, fatG: r.fatG }))}
+          quick={{ saved: saved.map((m) => ({ id: m.id, name: m.name, items: m.items })), frequent, previous: yesterdayMeals }}
           aiEnabled={aiConfigured()}
         />
 

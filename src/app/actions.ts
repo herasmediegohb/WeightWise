@@ -195,7 +195,7 @@ export async function addFood(input: {
   date: string;
   meal: Meal;
   items: FoodItem[];
-  source: "ai_text" | "ai_photo" | "manual" | "saved";
+  source: "ai_text" | "ai_photo" | "manual" | "saved" | "barcode";
   saveAs?: string;
   savedMealId?: number;
 }): Promise<Result> {
@@ -243,6 +243,33 @@ export async function updateFood(input: { id: number; meal: Meal } & FoodItem): 
     .where(eq(schema.foodEntries.id, input.id));
   refresh();
   return { ok: true };
+}
+
+/** Copies every food logged on one day to another (for "same as yesterday"). */
+export async function copyDay(from: string, to: string): Promise<Result<{ count: number; calories: number }>> {
+  await assertAuthed();
+  if (!isValidDate(from) || !isValidDate(to)) return fail("Pick a valid date.");
+  const db = await getDb();
+  const rows = await db
+    .select()
+    .from(schema.foodEntries)
+    .where(sql`${schema.foodEntries.date} = ${from} and ${schema.foodEntries.source} <> 'import'`);
+  if (!rows.length) return fail("Nothing was logged that day.");
+  await db.insert(schema.foodEntries).values(
+    rows.map((r) => ({
+      date: to,
+      meal: r.meal,
+      name: r.name,
+      quantity: r.quantity,
+      calories: r.calories,
+      proteinG: r.proteinG,
+      carbsG: r.carbsG,
+      fatG: r.fatG,
+      source: "saved" as const,
+    })),
+  );
+  refresh();
+  return { ok: true, count: rows.length, calories: rows.reduce((a, r) => a + r.calories, 0) };
 }
 
 export async function deleteFood(id: number): Promise<Result> {

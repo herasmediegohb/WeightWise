@@ -82,25 +82,75 @@ export async function getSavedMeals() {
   return db.select().from(savedMeals).orderBy(desc(savedMeals.useCount), desc(savedMeals.lastUsedAt));
 }
 
-/** Distinct recent foods, newest first, for one-tap re-logging. */
-export async function getRecentFoods(limit = 12) {
+export type QuickFood = {
+  name: string;
+  quantity: string;
+  calories: number;
+  proteinG: number;
+  carbsG: number;
+  fatG: number;
+  timesLogged: number;
+};
+
+/**
+ * Foods logged more than once in the last 90 days, most frequent first,
+ * then the most recent one-offs. Uses the latest values logged for each.
+ */
+export async function getFrequentFoods(today: string, limit = 15): Promise<QuickFood[]> {
   const db = await getDb();
   const rows = await db
     .select()
     .from(foodEntries)
-    .where(sql`${foodEntries.source} <> 'import'`)
+    .where(and(gte(foodEntries.date, addDays(today, -90)), sql`${foodEntries.source} <> 'import'`))
     .orderBy(desc(foodEntries.createdAt))
-    .limit(80);
-  const seen = new Set<string>();
-  const out: typeof rows = [];
-  for (const r of rows) {
-    const key = `${r.name.toLowerCase()}|${r.quantity ?? ""}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(r);
-    if (out.length >= limit) break;
-  }
-  return out;
+    .limit(400);
+  const groups = new Map<string, { food: QuickFood; last: number }>();
+  rows.forEach((r, i) => {
+    const key = `${r.name.trim().toLowerCase()}|${(r.quantity ?? "").trim().toLowerCase()}`;
+    const g = groups.get(key);
+    if (g) g.food.timesLogged++;
+    else
+      groups.set(key, {
+        last: i,
+        food: {
+          name: r.name,
+          quantity: r.quantity ?? "",
+          calories: r.calories,
+          proteinG: r.proteinG,
+          carbsG: r.carbsG,
+          fatG: r.fatG,
+          timesLogged: 1,
+        },
+      });
+  });
+  return [...groups.values()]
+    .sort((a, b) => b.food.timesLogged - a.food.timesLogged || a.last - b.last)
+    .slice(0, limit)
+    .map((g) => g.food);
+}
+
+export type PastMeal = { meal: "breakfast" | "lunch" | "dinner" | "snack"; items: QuickFood[]; calories: number };
+
+/** The meals logged on one day, for "copy yesterday's breakfast". */
+export async function getMealsForDay(date: string): Promise<PastMeal[]> {
+  const rows = (await getFoodForDay(date)).filter((r) => r.source !== "import");
+  const order = ["breakfast", "lunch", "dinner", "snack"] as const;
+  return order
+    .map((meal) => {
+      const items = rows
+        .filter((r) => r.meal === meal)
+        .map((r) => ({
+          name: r.name,
+          quantity: r.quantity ?? "",
+          calories: r.calories,
+          proteinG: r.proteinG,
+          carbsG: r.carbsG,
+          fatG: r.fatG,
+          timesLogged: 1,
+        }));
+      return { meal, items, calories: items.reduce((a, i) => a + i.calories, 0) };
+    })
+    .filter((m) => m.items.length > 0);
 }
 
 export async function getCheckins(limit = 8) {

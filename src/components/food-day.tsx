@@ -1,12 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { ForkKnife, Plus } from "@phosphor-icons/react";
+import { CopySimple, ForkKnife, Plus } from "@phosphor-icons/react";
 import { toast } from "sonner";
-import { deleteFood, updateFood } from "@/app/actions";
+import { copyDay, deleteFood, updateFood } from "@/app/actions";
 import { MEALS, type Meal } from "@/lib/meals";
 import { int } from "@/lib/utils";
-import { FoodSheet, type RecentFood, type SavedMealLite } from "./food-sheet";
+import { FoodSheet, type QuickData } from "./food-sheet";
 import { Button, Card, Empty, Field, Segmented, Sheet } from "./ui";
 
 export type Entry = {
@@ -25,20 +25,22 @@ export function FoodDay({
   dateLabel,
   entries,
   defaultMeal,
-  saved,
-  recents,
+  quick,
+  previousDate,
   aiEnabled,
 }: {
   date: string;
   dateLabel: string;
   entries: Entry[];
   defaultMeal: Meal;
-  saved: SavedMealLite[];
-  recents: RecentFood[];
+  quick: QuickData;
+  /** The day before `date`, offered as "copy all" when this day is empty. */
+  previousDate: string;
   aiEnabled: boolean;
 }) {
   const [addMeal, setAddMeal] = useState<Meal | null>(null);
   const [editing, setEditing] = useState<Entry | null>(null);
+  const [copying, setCopying] = useState(false);
 
   return (
     <>
@@ -52,7 +54,25 @@ export function FoodDay({
           <Empty
             icon={<ForkKnife size={24} />}
             title="Nothing logged for this day"
-            body={aiEnabled ? "Describe a meal or take a photo and the app estimates the calories and macros." : "Add what you ate to track calories and protein against your targets."}
+            body={aiEnabled ? "Describe a meal, scan a barcode or take a photo, and the app works out the calories and macros." : "Add what you ate to track calories and protein against your targets."}
+            action={
+              quick.previous.length > 0 ? (
+                <Button
+                  variant="secondary"
+                  loading={copying}
+                  onClick={async () => {
+                    setCopying(true);
+                    const res = await copyDay(previousDate, date);
+                    setCopying(false);
+                    if (!res.ok) return toast.error(res.error);
+                    toast.success(`Copied ${res.count} item${res.count === 1 ? "" : "s"}, ${int(res.calories)} kcal`);
+                  }}
+                >
+                  <CopySimple size={18} aria-hidden />
+                  Copy the day before ({int(quick.previous.reduce((a, m) => a + m.calories, 0))} kcal)
+                </Button>
+              ) : undefined
+            }
           />
         </Card>
       ) : (
@@ -108,8 +128,7 @@ export function FoodDay({
         date={date}
         dateLabel={dateLabel}
         defaultMeal={addMeal ?? defaultMeal}
-        saved={saved}
-        recents={recents}
+        quick={quick}
         aiEnabled={aiEnabled}
       />
       <EditSheet entry={editing} onClose={() => setEditing(null)} />

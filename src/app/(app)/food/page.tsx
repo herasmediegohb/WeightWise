@@ -4,7 +4,7 @@ import { CaretLeft, CaretRight } from "@phosphor-icons/react/dist/ssr";
 import { FoodDay } from "@/components/food-day";
 import { Bar, Card, Ring } from "@/components/ui";
 import { aiConfigured } from "@/lib/ai";
-import { getFoodForDay, getProfile, getRecentFoods, getSavedMeals } from "@/lib/data";
+import { getFoodForDay, getFrequentFoods, getMealsForDay, getProfile, getSavedMeals } from "@/lib/data";
 import { addDays, formatShort, formatWeekday, isValidDate, relativeDay } from "@/lib/dates";
 import { mealForHour } from "@/lib/meals";
 import { getClock } from "@/lib/session";
@@ -18,7 +18,12 @@ export default async function FoodPage({ searchParams }: { searchParams: Promise
   const { today, hour } = await getClock();
   const sp = await searchParams;
   const date = isValidDate(sp.date) && sp.date <= today ? sp.date : today;
-  const [entries, saved, recents] = await Promise.all([getFoodForDay(date), getSavedMeals(), getRecentFoods()]);
+  const [entries, saved, frequent, previous] = await Promise.all([
+    getFoodForDay(date),
+    getSavedMeals(),
+    getFrequentFoods(today),
+    getMealsForDay(addDays(date, -1)),
+  ]);
 
   const t = entries.reduce(
     (a, e) => ({ calories: a.calories + e.calories, proteinG: a.proteinG + e.proteinG, carbsG: a.carbsG + e.carbsG, fatG: a.fatG + e.fatG }),
@@ -107,8 +112,8 @@ export default async function FoodPage({ searchParams }: { searchParams: Promise
         dateLabel={label}
         entries={entries.map((e) => ({ id: e.id, meal: e.meal, name: e.name, quantity: e.quantity, calories: e.calories, proteinG: e.proteinG, carbsG: e.carbsG, fatG: e.fatG }))}
         defaultMeal={date === today ? mealForHour(hour) : "breakfast"}
-        saved={saved.map((m) => ({ id: m.id, name: m.name, items: m.items }))}
-        recents={recents.map((r) => ({ id: r.id, name: r.name, quantity: r.quantity ?? "", calories: r.calories, proteinG: r.proteinG, carbsG: r.carbsG, fatG: r.fatG }))}
+        quick={{ saved: saved.map((m) => ({ id: m.id, name: m.name, items: m.items })), frequent, previous }}
+        previousDate={addDays(date, -1)}
         aiEnabled={aiConfigured()}
       />
     </div>

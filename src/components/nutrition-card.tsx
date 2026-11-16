@@ -5,7 +5,7 @@ import Link from "next/link";
 import { ArrowRight, Plus } from "@phosphor-icons/react";
 import type { Meal } from "@/lib/meals";
 import { cn, int } from "@/lib/utils";
-import { FoodSheet, type RecentFood, type SavedMealLite } from "./food-sheet";
+import { FoodSheet, type QuickData } from "./food-sheet";
 import { Bar, Button, Card, Eyebrow, Ring } from "./ui";
 
 export function NutritionCard({
@@ -17,8 +17,7 @@ export function NutritionCard({
   calorieTarget,
   proteinTarget,
   defaultMeal,
-  saved,
-  recents,
+  quick,
   aiEnabled,
   className,
 }: {
@@ -30,8 +29,7 @@ export function NutritionCard({
   calorieTarget: number;
   proteinTarget: number;
   defaultMeal: Meal;
-  saved: SavedMealLite[];
-  recents: RecentFood[];
+  quick: QuickData;
   aiEnabled: boolean;
   className?: string;
 }) {
@@ -92,8 +90,7 @@ export function NutritionCard({
         date={date}
         dateLabel="Today"
         defaultMeal={defaultMeal}
-        saved={saved}
-        recents={recents}
+        quick={quick}
         aiEnabled={aiEnabled}
       />
     </Card>

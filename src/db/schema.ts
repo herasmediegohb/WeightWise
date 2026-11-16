@@ -1,4 +1,5 @@
 import {
+  boolean,
   date,
   integer,
   jsonb,
@@ -7,6 +8,7 @@ import {
   serial,
   text,
   timestamp,
+  unique,
 } from "drizzle-orm/pg-core";
 
 export type FoodItem = {
@@ -53,6 +55,16 @@ export const profile = pgTable("profile", {
   calorieTarget: integer("calorie_target").notNull(),
   proteinTargetG: integer("protein_target_g").notNull(),
   waterTargetOz: integer("water_target_oz").notNull().default(80),
+  /** Display units: imperial (lb, oz, ft/in) or metric (kg, ml, cm). Data is always stored imperial. */
+  units: text("units").$type<"imperial" | "metric">().notNull().default("imperial"),
+  /** Losing toward the goal, or holding at it. */
+  phase: text("phase").$type<"lose" | "maintain">().notNull().default("lose"),
+  /** Used to send reminders at local times. */
+  timezone: text("timezone").notNull().default("UTC"),
+  /** Local times "HH:MM", or null when off. */
+  reminderWeighIn: text("reminder_weigh_in"),
+  reminderWater: text("reminder_water"),
+  notifyCheckin: boolean("notify_checkin").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -75,7 +87,7 @@ export const foodEntries = pgTable("food_entries", {
   carbsG: real("carbs_g").notNull().default(0),
   fatG: real("fat_g").notNull().default(0),
   source: text("source")
-    .$type<"ai_text" | "ai_photo" | "manual" | "saved" | "import">()
+    .$type<"ai_text" | "ai_photo" | "manual" | "saved" | "barcode" | "import">()
     .notNull()
     .default("manual"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -125,6 +137,57 @@ export const chatMessages = pgTable("chat_messages", {
   id: serial("id").primaryKey(),
   role: text("role").$type<"user" | "assistant">().notNull(),
   content: text("content").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Small key/value store for app-wide state (push keys, scheduler heartbeat). */
+export const appState = pgTable("app_state", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const pushSubscriptions = pgTable("push_subscriptions", {
+  id: serial("id").primaryKey(),
+  endpoint: text("endpoint").notNull().unique(),
+  keys: jsonb("keys").$type<{ p256dh: string; auth: string }>().notNull(),
+  device: text("device"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** One row per reminder sent, so each fires at most once a day. */
+export const reminderLog = pgTable(
+  "reminder_log",
+  {
+    id: serial("id").primaryKey(),
+    kind: text("kind").notNull(),
+    date: date("date").notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [unique("reminder_log_kind_date").on(t.kind, t.date)],
+);
+
+export type BarcodeProduct = {
+  code: string;
+  name: string;
+  brand: string | null;
+  servingLabel: string | null;
+  servingGrams: number | null;
+  per100g: { calories: number; proteinG: number; carbsG: number; fatG: number };
+  perServing: { calories: number; proteinG: number; carbsG: number; fatG: number } | null;
+};
+
+export const barcodeProducts = pgTable("barcode_products", {
+  code: text("code").primaryKey(),
+  product: jsonb("product").$type<BarcodeProduct | null>(),
+  fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const backups = pgTable("backups", {
+  id: serial("id").primaryKey(),
+  reason: text("reason").$type<"weekly" | "manual" | "before-restore" | "before-delete">().notNull(),
+  data: jsonb("data").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
